@@ -32,7 +32,9 @@ export
     initialize_source_tree,
     compute_interaction_list!,
     compute_cone_list!,
-    clear_interpolants!
+    clear_interpolants!,
+    # macros
+    @hprofile
 
 WavePropBase.@export_interface
 
