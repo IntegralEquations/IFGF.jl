@@ -24,6 +24,9 @@ export
     # types
     UniformCartesianMesh,
     DyadicSplitter,
+    CardinalitySplitter,
+    GeometricMinimalSplitter,
+    GeometricSplitter,
     TargetTree,
     SourceTree,
     IFGFOperator,
@@ -35,6 +38,8 @@ export
     clear_interpolants!,
     # macros
     @hprofile
+    # modules
+    Utils
 
 WavePropBase.@export_interface
 

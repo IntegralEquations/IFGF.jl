@@ -97,10 +97,10 @@ end
 end
 
 @testset "Near and far field" begin
-    nx,ny  = 10000, 10000
+    nx,ny  = 25000, 25000
     Xpts   = rand(SVector{2,Float64},nx)
     Ypts   = [rand(SVector{2,Float64}) for _ in 1:ny]
-    spl   = DyadicSplitter(;nmax=100)
+    spl   = DyadicSplitter(;nmax=20)
     source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=Float64)
     target = initialize_target_tree(;points=Xpts,splitter=spl)
     compute_interaction_list!(target,source,IFGF.admissible)
