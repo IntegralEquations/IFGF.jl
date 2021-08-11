@@ -12,7 +12,7 @@ const k = 8π
 ppw     = 16
 dx      = λ/ppw
 
-pde = Helmholtz(dim=3,k=k)
+pde = Laplace(dim=3)
 K   = SingleLayerKernel(pde)
 
 const T = return_type(K)
@@ -41,17 +41,8 @@ tfull = @elapsed exa = [sum(K(Xpts[i],Ypts[j])*B[j] for j in 1:ny) for i in I]
 # spl   = GeometricSplitter(;nmax=100)
 spl = DyadicSplitter(;nmax=100)
 
-function ds_oscillatory(source)
-    # h    = radius(source.bounding_box)
-    bbox = source.bounding_box
-    w = bbox.high_corner - bbox.low_corner |> maximum
+function ds_laplace(source)
     ds   = Float64.((1,π/2,π/2))
-    δ    = k*w/2
-    if δ < 1
-        return ds
-    else
-        return ds ./ δ
-    end
 end
 
 # cone list
@@ -60,7 +51,7 @@ source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=T)
 target = initialize_target_tree(;points=Xpts,splitter=spl)
 compute_interaction_list!(target,source,IFGF.admissible)
 #
-ds = (source) -> ds_oscillatory(source)
+ds = (source) -> ds_laplace(source)
 @hprofile compute_cone_list!(source,p,ds)
 @info source.data.p
 C  = zeros(T,nx)

@@ -117,7 +117,6 @@ function _compute_near_interaction!(C,A::IFGFOperator,B,node)
         I = near_target.loc_idxs
         for i in I
             for j in J
-                i == j && continue
                 C[i] += K(Xpts[i], Ypts[j]) * B[j]
             end
         end
@@ -185,24 +184,13 @@ function _transfer_to_parent!(C,A,B,node,interps)
             si        = cart2interp(xi,node)
             poly      = interps[idxcone]
             # transfer block's interpolant to parent's interpolants
-            # @assert si ∈ els[idxcone]
             scale = K(xi, xc) / K(xi, xc_parent)
-            # d1 = norm(xi-xc)
-            # d2 = norm(xi-xc_parent)
-            # scale = ComplexF64(exp(im*4π*(d1-d2))*d2/d1)
+            # TODO: this scaling factor can often be computed more efficiently
+            # than two evaluations of the kernel followed by a division. We
+            # should define a few methods for the kernel `K` such as
+            # `scale_to_parent` and `analytic_factor` to make such evaluations faster.
             vals[idxval] += poly(si) * scale
         end
     end
     return nothing
-end
-
-function test_source_tree(tree)
-    for node in AbstractTrees.PostOrderDFS(tree)
-        for interp in values(node.data.interps)
-            vmin,vmax = extrema(abs,interp.vals)
-            if vmin == vmax == 0
-                @info vmin,vmax
-            end
-        end
-    end
 end
