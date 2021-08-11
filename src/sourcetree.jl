@@ -280,9 +280,12 @@ function cone_index(x,tree::SourceTree)
     Δs  = step(msh)
     N   = length(s)
     lc  = svector(i->msh.grids[i].start,N)
+    uc  = svector(i->msh.grids[i].stop,N)
     I  = ntuple(N) do n
-        if s[n] == lc[n]
+        if s[n] ≈ lc[n]
             i = 1
+        elseif s[n] ≈ uc[n]
+            i = sz[n]
         else
             q = (s[n]-lc[n])/Δs[n]
             i = ceil(Int,q)
