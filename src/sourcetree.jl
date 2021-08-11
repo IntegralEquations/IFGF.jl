@@ -198,7 +198,7 @@ function initialize_cone_interpolant!(source::SourceTree{N,Td,T},p_func,ds_func)
         els_parent = ElementIterator(parent.data.cart_mesh)
         for I in parent.data.active_idxs
             rec  = els_parent[I]
-            cheb = cheb2nodes_iter(data.p.-1,rec.low_corner,rec.high_corner)
+            cheb = cheb2nodes_iter(data.p,rec.low_corner,rec.high_corner)
             for si in cheb # interpolation node in interpolation space
                 # interpolation node in physical space
                 xi = interp2cart(si,parent)
@@ -256,7 +256,7 @@ function compute_interpolation_domain(source::SourceTree{N,Td,T}) where {N,Td,T}
         els_parent    = ElementIterator(parent.data.cart_mesh)
         for idxinterp in parent.data.active_idxs
             rec = els_parent[idxinterp]
-            cheb = cheb2nodes_iter(data.p.-1,rec.low_corner,rec.high_corner)
+            cheb = cheb2nodes_iter(data.p,rec.low_corner,rec.high_corner)
             for si in cheb
                 # interpolation node in physical space
                 xi = interp2cart(si,parent)
@@ -304,7 +304,7 @@ function interpolation_points(source::SourceTree,p,I::CartesianIndex)
     data   = source.data
     els    = ElementIterator(data.cart_mesh)
     rec    = els[I]
-    cheb   = cheb2nodes_iter(data.p.-1,rec.low_corner,rec.high_corner)
+    cheb   = cheb2nodes_iter(data.p,rec.low_corner,rec.high_corner)
     map(si -> interp2cart(si,source),cheb)
 end
 

@@ -35,28 +35,7 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
         # precomputations
         els = ElementIterator(node.data.cart_mesh)
         @timeit_debug "allocate interpolant data" begin
-            # leaves allocate their own interpolant vals
-            if isleaf(node)
-                for I in node.data.active_idxs
-                    rec = els[I]
-                    cheb   = cheb2nodes_iter(node.data.p,rec.low_corner,rec.high_corner)
-                    inodes = map(si->interp2cart(si,node),cheb)
-                    vals   = zeros(T,node.data.p)
-                    node.data.interp_data[I] = (inodes, vals)
-                end
-            end
-            # allocate parent data (if needed)
-            if !isroot(node)
-                els_parent = ElementIterator(node.parent.data.cart_mesh)
-                for I in node.parent.data.active_idxs
-                    haskey(node.parent.data.interp_data,I) && continue # already initialized
-                    rec = els_parent[I]
-                    cheb   = cheb2nodes_iter(node.parent.data.p,rec.low_corner,rec.high_corner)
-                    inodes = map(si->interp2cart(si,node.parent),cheb)
-                    vals   = zeros(T,node.data.p)
-                    node.parent.data.interp_data[I] = (inodes,vals)
-                end
-            end
+            _allocate_data!(node)
         end
         @timeit_debug "near interactions" begin
             _compute_near_interaction!(C,A,B,node)
@@ -68,13 +47,7 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
         end
         #
         @timeit_debug "construct chebyshev interpolants" begin
-            interps = Dict{CartesianIndex{N},ChebPoly{N,T,Td}}()
-            for I in node.data.active_idxs
-                _,vals     = node.data.interp_data[I]
-                rec        = els[I]
-                poly       = chebfit!(vals,rec.low_corner,rec.high_corner,plan)
-                push!(interps,I=>poly)
-            end
+            interps = _construct_chebyshev_interpolants(node,plan)
         end
         # handle far targets by interpolation
         @timeit_debug "far interactions" begin
@@ -91,6 +64,45 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
     # permute output
     permute!(C,Xtree.glob2loc)
     return C
+end
+
+function _allocate_data!(node::SourceTree{N,Td,T}) where {N,Td,T}
+    # leaves allocate their own interpolant vals
+    els = ElementIterator(node.data.cart_mesh)
+    if isleaf(node)
+        for I in node.data.active_idxs
+            rec = els[I]
+            cheb   = cheb2nodes_iter(node.data.p,rec.low_corner,rec.high_corner)
+            inodes = map(si->interp2cart(si,node),cheb)
+            vals   = zeros(T,node.data.p)
+            node.data.interp_data[I] = (inodes, vals)
+        end
+    end
+    # allocate parent data (if needed)
+    if !isroot(node)
+        els_parent = ElementIterator(node.parent.data.cart_mesh)
+        for I in node.parent.data.active_idxs
+            haskey(node.parent.data.interp_data,I) && continue # already initialized
+            rec = els_parent[I]
+            cheb   = cheb2nodes_iter(node.parent.data.p,rec.low_corner,rec.high_corner)
+            inodes = map(si->interp2cart(si,node.parent),cheb)
+            vals   = zeros(T,node.data.p)
+            node.parent.data.interp_data[I] = (inodes,vals)
+        end
+    end
+    return node
+end
+
+function _construct_chebyshev_interpolants(node::SourceTree{N,Td,T},plan) where {N,Td,T}
+    els     = ElementIterator(node.data.cart_mesh)
+    interps = Dict{CartesianIndex{N},ChebPoly{N,T,Td}}()
+    for I in node.data.active_idxs
+        _,vals     = node.data.interp_data[I]
+        rec        = els[I]
+        poly       = chebfit!(vals,rec.low_corner,rec.high_corner,plan)
+        push!(interps,I=>poly)
+    end
+    return interps
 end
 
 function _compute_near_interaction!(C,A::IFGFOperator,B,node)
@@ -171,7 +183,7 @@ function _transfer_to_parent!(C,A,B,node,interps)
             xi = nodes[idxval]
             idxcone   = cone_index(xi, node)
             si        = cart2interp(xi,node)
-            poly         = interps[idxcone]
+            poly      = interps[idxcone]
             # transfer block's interpolant to parent's interpolants
             # @assert si ∈ els[idxcone]
             scale = K(xi, xc) / K(xi, xc_parent)
