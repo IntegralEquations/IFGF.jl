@@ -1,12 +1,18 @@
+const NodesAndVals{N,Td,T} = Tuple{Array{SVector{N,Td},N},Array{T,N}}
+
 mutable struct SourceTreeData{N,Td,T}
-    # mesh of [0,η] × [0,π] × [0,2π) for N = 3 or [0,η] × [0,π] for N=2, where η < 1
+    # mesh of interpolation domain
     cart_mesh::UniformCartesianMesh{N,Td}
-    # cone interpolants
-    interps::Dict{CartesianIndex{N},TensorLagInterp{N,Td,T}}
+    # active cone indices
+    active_idxs::Set{CartesianIndex{N}}
+    # mapping from an element `I` in the `cart_mesh` to the cheb nodes and values
+    interp_data::Dict{CartesianIndex{N},NodesAndVals{N,Td,T}}
     # elements that can be interpolated
     far_list::Vector{TargetTree{N,Td}}
     # elements that cannot be interpolated
     near_list::Vector{TargetTree{N,Td}}
+    # number of interpolation poins per cone per dimension
+    p::NTuple{N,Int}
 end
 function SourceTreeData{N,Td,T}() where {N,Td,T}
     if N == 2
@@ -18,10 +24,12 @@ function SourceTreeData{N,Td,T}() where {N,Td,T}
     else
         notimplemented()
     end
-    interps   = Dict{CartesianIndex{N},TensorLagInterp{N,Td,T}}()
+    idxs      = Set{CartesianIndex{N}}()
+    interps   = Dict{CartesianIndex{N},NodesAndVals{N,Td,T}}()
     far_list  = Vector{TargetTree{N,Td}}()
     near_list = Vector{TargetTree{N,Td}}()
-    SourceTreeData{N,Td,T}(msh,interps,far_list,near_list)
+    p = ntuple(i->0,N)
+    SourceTreeData{N,Td,T}(msh,idxs,interps,far_list,near_list,p)
 end
 
 const SourceTree{N,Td,T} = ClusterTree{N,Td,SourceTreeData{N,Td,T}}
@@ -80,23 +88,6 @@ function cart2interp(x,source::SourceTree{N}) where {N}
     else
         notimplemented()
     end
-end
-
-"""
-    interpolation_domain(tree::SourceTree)
-
-HyperRectangle where interpolation in the `(s,θ,φ)` variables (or (`s,θ`) in two
-dimensions) take place.
-"""
-function interpolation_domain(::SourceTree{N,Td}) where {N,Td}
-    if N == 2
-        domain = HyperRectangle{2,Td}((0,0),(sqrt(2)/2,2π))
-    elseif N == 3
-        domain = HyperRectangle{3,Td}((0,0,0),(sqrt(3)/3,π,2π))
-    else
-        notimplemented()
-    end
-    return domain
 end
 
 cart_mesh(t::SourceTree) = t |> data |> cart_mesh
@@ -179,48 +170,43 @@ function ds_oscillatory(source,k)
     1/(k*h) * @SVector ones(N)
 end
 
-function initialize_cone_interpolant!(source::SourceTree{N,Td,T},p,ds_func) where {N,Td,T}
+function initialize_cone_interpolant!(source::SourceTree{N,Td,T},p_func,ds_func) where {N,Td,T}
     length(source.loc_idxs) == 0 && (return source)
-    ds             = ds_func(source)
-    data           = source.data
+    ds      = ds_func(source)
+    p       = p_func(source)
+    data    = source.data
+    data.p  = p
     # find minimal axis-aligned bounding box for interpolation points
     domain         = compute_interpolation_domain(source)
     all(domain.low_corner .< domain.high_corner) || (return source)
     data.cart_mesh = UniformCartesianMesh(domain;step=ds)
     els            = ElementIterator(data.cart_mesh)
-    dict           = data.interps
+    set            = data.active_idxs
     # initialize all cones needed to cover far field
     for far_target in data.far_list
         I = far_target.loc_idxs
         for i in I
-            x     = far_target.points[i] # target point
+            x        = far_target.points[i] # target point
             idxcone  = cone_index(x,source)
-            haskey(dict,idxcone) && continue
-            rec    = els[idxcone]
-            vals   = zeros(T,ntuple(i->0,N))
-            # vals   = zeros(T,p)
-            inew   = TensorLagInterp(vals,rec,cheb1nodes,cheb1weights,p)
-            push!(dict,idxcone=>inew)
+            idxcone ∈ set && continue
+            push!(set,idxcone)
         end
     end
     # if not a root, also create all cones needed to cover interpolation points of parents
     if !isroot(source)
         parent = source.parent
-        for (idxinterp,interp) in parent.data.interps
-            for idxval in CartesianIndices(interp)
-                # interpolation node in interpolation space
-                si = interpolation_nodes(interp,idxval)
+        els_parent = ElementIterator(parent.data.cart_mesh)
+        for I in parent.data.active_idxs
+            rec  = els_parent[I]
+            cheb = chebpoints(data.p.-1,rec.low_corner,rec.high_corner)
+            for si in cheb # interpolation node in interpolation space
                 # interpolation node in physical space
                 xi = interp2cart(si,parent)
                 # mesh index for interpolation point
                 idxcone = cone_index(xi,source)
                 # initialize cone if needed
-                haskey(dict,idxcone) && continue
-                rec    = els[idxcone]
-                vals   = zeros(T,ntuple(i->0,N))
-                # vals   = zeros(T,p)
-                inew   = TensorLagInterp(vals,rec,cheb1nodes,cheb1weights,p)
-                push!(dict,idxcone=>inew)
+                idxcone ∈ set && continue
+                push!(set,idxcone)
             end
         end
     end
@@ -267,10 +253,11 @@ function compute_interpolation_domain(source::SourceTree{N,Td,T}) where {N,Td,T}
     end
     if !isroot(source)
         parent = source.parent
-        for (idxinterp,interp) in parent.data.interps
-            for idxval in CartesianIndices(interp)
-                # interpolation node in interpolation space
-                si = interpolation_nodes(interp,idxval)
+        els_parent    = ElementIterator(parent.data.cart_mesh)
+        for idxinterp in parent.data.active_idxs
+            rec = els_parent[idxinterp]
+            cheb = chebpoints(data.p.-1,rec.low_corner,rec.high_corner)
+            for si in cheb
                 # interpolation node in physical space
                 xi = interp2cart(si,parent)
                 s  = cart2interp(xi,source)
@@ -289,7 +276,7 @@ function cone_index(x,tree::SourceTree)
     msh = tree.data.cart_mesh
     s   = cart2interp(x,tree)
     els = ElementIterator(msh)
-    sz = size(els)
+    sz  = size(els)
     Δs  = step(msh)
     N   = length(s)
     lc  = svector(i->msh.grids[i].start,N)
@@ -307,37 +294,18 @@ function cone_index(x,tree::SourceTree)
     CartesianIndex(I)
 end
 
-function clear_interpolants!(source::SourceTree)
-    for interp in values(source.data.interps)
-        fill!(interp.vals,0)
-    end
-    if !isleaf(source)
-        for child in children(source)
-            clear_interpolants!(child)
-        end
-    end
-    return source
-end
-
 """
     interpolation_points(s::SourceTree,I::CartesianIndex)
 
 Return the interpolation points, in cartesian coordinates, for the cone
 interpolant of index `I`.
 """
-function interpolation_points(s::SourceTree,I::CartesianIndex)
-    data   = s.data
+function interpolation_points(source::SourceTree,p,I::CartesianIndex)
+    data   = source.data
     els    = ElementIterator(data.cart_mesh)
     rec    = els[I]
-    xc     = center(rec)
-    R      = radius(rec)
-    interp = data.interps[I]
-    iter   = CartesianIndices(interp)
-    map(iter) do I
-        si = interpolation_nodes(interp,I)
-        xi = interp2cart(si,s)
-        return xi
-    end
+    cheb   = chebpoints(data.p.-1,rec.low_corner,rec.high_corner)
+    map(si -> interp2cart(si,source),cheb)
 end
 
 ## Plot recipes

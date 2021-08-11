@@ -24,54 +24,69 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
     # multiply at the beginning by `a` and `b` and be done with it
     rmul!(C,b)
     rmul!(B,a)
+    # do some planning for the fft
+    @timeit_debug "planning fft" begin
+        plan = FFTW.plan_r2r!(zeros(T,Ytree.data.p),FFTW.REDFT00;flags=FFTW.PATIENT)
+    end
     # iterate over all nodes in source tree, visiting children before parents
     for node in AbstractTrees.PostOrderDFS(Ytree)
         length(node.loc_idxs) == 0 && continue
         # allocate necessary interpolation data and perform necessary
         # precomputations
-        @timeit_debug "prepare interpolants" begin
-            # precompute nodes and weights to make interpolation faster
-            for interp in values(node.data.interps)
-                precompute_nodes_and_weights!(interp)
-            end
-            # leaves allocate their own interpolante vals
+        els = ElementIterator(node.data.cart_mesh)
+        @timeit_debug "allocate interpolant data" begin
+            # leaves allocate their own interpolant vals
             if isleaf(node)
-                for interp in values(node.data.interps)
-                    p = length.(interp.nodes1d)
-                    interp.vals = zeros(T,p)
+                for I in node.data.active_idxs
+                    rec = els[I]
+                    cheb   = cheb2nodes_iter(node.data.p,rec.low_corner,rec.high_corner)
+                    inodes = map(si->interp2cart(si,node),cheb)
+                    vals   = zeros(T,node.data.p)
+                    node.data.interp_data[I] = (inodes, vals)
                 end
             end
             # allocate parent data (if needed)
-            isroot(node) && continue
-            for interp in values(node.parent.data.interps)
-                isempty(interp.vals) || continue
-                p = length.(interp.nodes1d)
-                interp.vals = zeros(T,p)
+            if !isroot(node)
+                els_parent = ElementIterator(node.parent.data.cart_mesh)
+                for I in node.parent.data.active_idxs
+                    haskey(node.parent.data.interp_data,I) && continue # already initialized
+                    rec = els_parent[I]
+                    cheb   = cheb2nodes_iter(node.parent.data.p,rec.low_corner,rec.high_corner)
+                    inodes = map(si->interp2cart(si,node.parent),cheb)
+                    vals   = zeros(T,node.data.p)
+                    node.parent.data.interp_data[I] = (inodes,vals)
+                end
             end
         end
         @timeit_debug "near interactions" begin
             _compute_near_interaction!(C,A,B,node)
         end
-        # leaf blocks need to create their own interpolants since they have no
-        # children
+        # leaf blocks need to update their own interpolant values since they
+        # have no children
         @timeit_debug "leaf interpolants" begin
             isleaf(node) && _compute_own_interpolant!(C,A,B,node)
         end
+        #
+        @timeit_debug "construct chebyshev interpolants" begin
+            interps = Dict{CartesianIndex{N},ChebPoly{N,T,Td}}()
+            for I in node.data.active_idxs
+                _,vals     = node.data.interp_data[I]
+                rec        = els[I]
+                poly       = chebfit!(vals,rec.low_corner,rec.high_corner,plan)
+                push!(interps,I=>poly)
+            end
+        end
         # handle far targets by interpolation
         @timeit_debug "far interactions" begin
-            _compute_far_interaction!(C,A,B,node)
+            _compute_far_interaction!(C,A,B,node,interps)
         end
         # transfer node's contribution to parent's interpolant
         isroot(node) && continue
         @timeit_debug "transfer to parent" begin
-            _transfer_to_parent!(C,A,B,node)
+            _transfer_to_parent!(C,A,B,node,interps)
         end
         # free interpolation data
-        for interp in values(node.data.interps)
-            interp.vals     = zeros(T,ntuple(i->0,N))
-            interp._nodes   = zeros(SVector{N,Td},ntuple(i->0,N))
-            interp._weights = zeros(Td,ntuple(i->0,N))
-        end
+        empty!(node.data.interp_data)
     end
     # permute output
     permute!(C,Xtree.glob2loc)
@@ -90,6 +105,7 @@ function _compute_near_interaction!(C,A::IFGFOperator,B,node)
         I = near_target.loc_idxs
         for i in I
             for j in J
+                i == j && continue
                 C[i] += K(Xpts[i], Ypts[j]) * B[j]
             end
         end
@@ -105,21 +121,21 @@ function _compute_own_interpolant!(C,A,B,node)
     J     = node.loc_idxs
     bbox  = node.bounding_box
     xc    = center(bbox)
-    for interp in values(node.data.interps)
-        for idxval in CartesianIndices(interp)
-            si = interpolation_nodes(interp,idxval) # node in interpolation space
-            xi = interp2cart(si, node) # cartesian coordinate of node
+    for I in node.data.active_idxs
+        nodes,vals = node.data.interp_data[I]
+        for i in eachindex(nodes)
+            xi = nodes[i] # cartesian coordinate of node
             # add sum of factored part of kernel to the interpolation node
             fact = 1/K(xi, xc)
             for j in J
-                interp.vals[idxval] += K(xi, Ypts[j])*fact*B[j]
+                vals[i] += K(xi, Ypts[j])*fact*B[j]
             end
         end
     end
     return nothing
 end
 
-function _compute_far_interaction!(C,A,B,node)
+function _compute_far_interaction!(C,A,B,node,interps)
     Xtree = target_tree(A)
     Xpts  = Xtree.points
     Ytree = source_tree(A)
@@ -133,15 +149,15 @@ function _compute_far_interaction!(C,A,B,node)
             x       = Xpts[i]
             idxcone = cone_index(x, node)
             s       = cart2interp(x,node)
-            p       = node.data.interps[idxcone]
+            poly    = interps[idxcone]
             # @assert s ∈ els[idxcone]
-            C[i] += p(s,Val(:fast)) * K(x, xc)
+            C[i] += poly(s) * K(x, xc)
         end
     end
     return nothing
 end
 
-function _transfer_to_parent!(C,A,B,node)
+function _transfer_to_parent!(C,A,B,node,interps)
     K     = kernel(A)
     Ytree = source_tree(A)
     T     = return_type(Ytree)
@@ -149,21 +165,20 @@ function _transfer_to_parent!(C,A,B,node)
     xc   = center(bbox)
     parent    = node.parent
     xc_parent = parent.bounding_box |> center
-    els = ElementIterator(node.data.cart_mesh)
-    for (idxinterp,interp) in parent.data.interps
-        for idxval in CartesianIndices(interp.vals)
-            si_parent = interpolation_nodes(interp, idxval)  # node in interpolation space
-            xi        = interp2cart(si_parent,parent)   # cartesian coordiante of node
+    for idxinterp in parent.data.active_idxs
+        nodes,vals = parent.data.interp_data[idxinterp]
+        for idxval in eachindex(nodes)
+            xi = nodes[idxval]
             idxcone   = cone_index(xi, node)
             si        = cart2interp(xi,node)
-            p         = node.data.interps[idxcone]
+            poly         = interps[idxcone]
             # transfer block's interpolant to parent's interpolants
             # @assert si ∈ els[idxcone]
             scale = K(xi, xc) / K(xi, xc_parent)
             # d1 = norm(xi-xc)
             # d2 = norm(xi-xc_parent)
             # scale = ComplexF64(exp(im*4π*(d1-d2))*d2/d1)
-            interp.vals[idxval] += p(si,Val(:fast)) * scale
+            vals[idxval] += poly(si) * scale
         end
     end
     return nothing
