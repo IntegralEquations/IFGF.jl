@@ -158,9 +158,6 @@ function admissible(target::TargetTree{N},source::SourceTree{N},η=sqrt(N)/N) wh
     bbox = target.bounding_box
     dc   = distance(xc,bbox)
     # if target box is outside a sphere of radius h/η, consider it admissible.
-    # The same parameter η is used to construct the interpolation domain where
-    # `s=h/r ∈ (0,η)` with η<1. This assures that target points which must be
-    # interpolated are inside the interpolation domain.
     dc > h/η
 end
 
