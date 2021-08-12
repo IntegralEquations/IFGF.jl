@@ -5,10 +5,7 @@ using StaticArrays
 using TimerOutputs
 using Printf
 using RecipesBase
-using FastChebInterp
-using FastChebInterp: ChebPoly
 import AbstractTrees
-using FFTW
 
 using WavePropBase
 using WavePropBase.Utils
@@ -19,7 +16,6 @@ using WavePropBase.Interpolation
 WavePropBase.@import_interface
 
 include("utils.jl")
-include("chebinterp.jl")
 include("targettree.jl")
 include("sourcetree.jl")
 include("ifgfoperator.jl")

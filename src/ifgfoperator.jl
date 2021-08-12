@@ -24,10 +24,6 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
     # multiply at the beginning by `a` and `b` and be done with it
     rmul!(C,b)
     rmul!(B,a)
-    # do some planning for the fft
-    @timeit_debug "planning fft" begin
-        plan = FFTW.plan_r2r!(zeros(T,Ytree.data.p),FFTW.REDFT00;flags=FFTW.PATIENT)
-    end
     # iterate over all nodes in source tree, visiting children before parents
     for node in AbstractTrees.PostOrderDFS(Ytree)
         length(node.loc_idxs) == 0 && continue
@@ -47,7 +43,7 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
         end
         #
         @timeit_debug "construct chebyshev interpolants" begin
-            interps = _construct_chebyshev_interpolants(node,plan)
+            interps = _construct_chebyshev_interpolants(node)
         end
         # handle far targets by interpolation
         @timeit_debug "far interactions" begin
@@ -93,13 +89,18 @@ function _allocate_data!(node::SourceTree{N,Td,T}) where {N,Td,T}
     return node
 end
 
-function _construct_chebyshev_interpolants(node::SourceTree{N,Td,T},plan) where {N,Td,T}
+function _construct_chebyshev_interpolants(node::SourceTree{N,Td,T}) where {N,Td,T}
     els     = ElementIterator(node.data.cart_mesh)
-    interps = Dict{CartesianIndex{N},ChebPoly{N,T,Td}}()
+    interps = Dict{CartesianIndex{N},TensorLagInterp{N,Td,T}}()
+    p       = node.data.p
     for I in node.data.active_idxs
         _,vals     = node.data.interp_data[I]
         rec        = els[I]
-        poly       = chebfit!(vals,rec.low_corner,rec.high_corner,plan)
+        lc = rec.low_corner
+        uc = rec.high_corner
+        nodes1d   = ntuple(d->cheb2nodes(p[d],lc[d],uc[d]),N)
+        weights1d = ntuple(d->cheb2weights(p[d]),N)
+        poly      = TensorLagInterp(vals,nodes1d,weights1d)
         push!(interps,I=>poly)
     end
     return interps
@@ -188,7 +189,8 @@ function _transfer_to_parent!(C,A,B,node,interps)
             # TODO: this scaling factor can often be computed more efficiently
             # than two evaluations of the kernel followed by a division. We
             # should define a few methods for the kernel `K` such as
-            # `scale_to_parent` and `analytic_factor` to make such evaluations faster.
+            # `scale_to_parent` and `analytic_factor` to make such evaluations
+            # faster.
             vals[idxval] += poly(si) * scale
         end
     end
