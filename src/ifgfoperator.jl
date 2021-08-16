@@ -1,8 +1,11 @@
-struct IFGFOperator{N,Td,T,K}
+struct IFGFOperator{N,Td,T,K,U,V}
     kernel::K
     target_tree::TargetTree{N,Td}
     source_tree::SourceTree{N,Td,T}
+    target_dofs::Vector{U}
+    source_dofs::Vector{V}
 end
+IFGFOperator(K,target::TargetTree,source::SourceTree) = IFGFOperator(K,target,source,target.points,source.points)
 
 kernel(op::IFGFOperator) = op.kernel
 target_tree(op::IFGFOperator) = op.target_tree
@@ -108,9 +111,9 @@ end
 
 function _compute_near_interaction!(C,A::IFGFOperator,B,node)
     Xtree = target_tree(A)
-    Xpts  = Xtree.points
+    Xpts  = A.target_dofs
     Ytree = source_tree(A)
-    Ypts  = Ytree.points
+    Ypts  = A.source_dofs
     K     = kernel(A)
     J     = node.loc_idxs
     for near_target in node.data.near_list
@@ -128,7 +131,7 @@ end
 function _compute_own_interpolant!(C,A,B,node)
     Ytree = source_tree(A)
     T     = return_type(Ytree)
-    Ypts  = Ytree.points
+    Ypts  = A.source_dofs
     K     = kernel(A)
     J     = node.loc_idxs
     bbox  = node.bounding_box
@@ -138,9 +141,10 @@ function _compute_own_interpolant!(C,A,B,node)
         for i in eachindex(nodes)
             xi = nodes[i] # cartesian coordinate of node
             # add sum of factored part of kernel to the interpolation node
-            fact = 1/K(xi, xc)
+            fact = 1/centered_factor(K,xi,xc) # defaults to 1/K
             for j in J
-                vals[i] += K(xi, Ypts[j])*fact*B[j]
+                y = Ypts[j]
+                vals[i] += K(xi, y)*fact*B[j]
             end
         end
     end
@@ -149,7 +153,7 @@ end
 
 function _compute_far_interaction!(C,A,B,node,interps)
     Xtree = target_tree(A)
-    Xpts  = Xtree.points
+    Xpts  = A.target_dofs
     Ytree = source_tree(A)
     K     = kernel(A)
     bbox = node.bounding_box
@@ -159,11 +163,11 @@ function _compute_far_interaction!(C,A,B,node,interps)
         I = far_target.loc_idxs
         for i in I
             x       = Xpts[i]
-            idxcone = cone_index(x, node)
-            s       = cart2interp(x,node)
+            idxcone = cone_index(coords(x), node)
+            s       = cart2interp(coords(x),node)
             poly    = interps[idxcone]
             # @assert s ∈ els[idxcone]
-            C[i] += poly(s) * K(x, xc)
+            C[i] += poly(s) * centered_factor(K,x,xc)
         end
     end
     return nothing
@@ -185,14 +189,18 @@ function _transfer_to_parent!(C,A,B,node,interps)
             si        = cart2interp(xi,node)
             poly      = interps[idxcone]
             # transfer block's interpolant to parent's interpolants
-            scale = K(xi, xc) / K(xi, xc_parent)
-            # TODO: this scaling factor can often be computed more efficiently
-            # than two evaluations of the kernel followed by a division. We
-            # should define a few methods for the kernel `K` such as
-            # `scale_to_parent` and `analytic_factor` to make such evaluations
-            # faster.
-            vals[idxval] += poly(si) * scale
+            vals[idxval] += poly(si) * transfer_factor(K,xi,xc,xc_parent)
         end
     end
     return nothing
+end
+
+# generic fallback. May need to be overloaded for specific kernels.
+function centered_factor(K,x,yc)
+    K(x,yc)
+end
+
+# generic fallback. May need to be overloaded for specific kernels.
+function transfer_factor(K,x,yc,yc_parent)
+    centered_factor(K,x,yc)/centered_factor(K,x,yc_parent)
 end

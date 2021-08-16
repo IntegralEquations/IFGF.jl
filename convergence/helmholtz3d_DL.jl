@@ -7,13 +7,21 @@ using Random
 using Nystrom
 Random.seed!(1)
 
-const k = 8π
+const k = 4π
 λ       = 2π/k
 ppw     = 16
 dx      = λ/ppw
 
 pde = Helmholtz(dim=3,k=k)
-K   = SingleLayerKernel(pde)
+G   = SingleLayerKernel(pde)
+K   = DoubleLayerKernel(pde)
+
+function IFGF.centered_factor(::typeof(K),x,yc)
+    r = coords(x)-yc
+    d = norm(r)
+    exp(im*k*d)/d*(-im*k+1/d)
+    # G(x,yc)
+end
 
 const T = return_type(K)
 
@@ -24,6 +32,8 @@ geo = ParametricSurfaces.Sphere(;radius=1)
 np  = ceil(2/dx)
 M   = meshgen(Γ,(np,np))
 msh = NystromMesh(M,Γ;order=1)
+Xdofs = msh.dofs
+Ydofs = Xdofs
 Xpts = qcoords(msh) |> collect
 Ypts = Xpts
 nx = length(Xpts)
@@ -32,20 +42,17 @@ ny = length(Ypts)
 
 I   = rand(1:nx,1000)
 B   = rand(T,ny)
-tfull = @elapsed exa = [sum(K(Xpts[i],Ypts[j])*B[j] for j in 1:ny) for i in I]
+tfull = @elapsed exa = [sum(K(Xdofs[i],Ydofs[j])*B[j] for j in 1:ny) for i in I]
 @info "Estimated time for full product: $(tfull*nx/1000)"
 
 # trees
-# spl   = CardinalitySplitter(;nmax=100)
-# spl   = GeometricMinimalSplitter(;nmax=100)
-# spl   = GeometricSplitter(;nmax=100)
 spl = DyadicSplitter(;nmax=100)
 
 function ds_oscillatory(source)
     # h    = radius(source.bounding_box)
     bbox = source.bounding_box
     w = bbox.high_corner - bbox.low_corner |> maximum
-    ds   = Float64.((1,π/2,π/2))
+    ds   = Float64.((1.0,π/2,π/2))
     δ    = k*w/2
     if δ < 1
         return ds
@@ -57,14 +64,16 @@ end
 # cone list
 p = (node) -> (3,5,5)
 source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=T)
+permute!(Ydofs,source.loc2glob)
 target = initialize_target_tree(;points=Xpts,splitter=spl)
+# permute!(Xdofs,target.loc2glob)
 compute_interaction_list!(target,source,IFGF.admissible)
 #
 ds = (source) -> ds_oscillatory(source)
 @hprofile compute_cone_list!(source,p,ds)
 @info source.data.p
 C  = zeros(T,nx)
-A = IFGFOperator(K,target,source)
+A = IFGFOperator(K,target,source,Xdofs,Ydofs)
 @hprofile mul!(C,A,B)
 er = norm(C[I]-exa,2) / norm(exa,2)
 @info er,nx
