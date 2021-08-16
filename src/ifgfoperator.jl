@@ -1,7 +1,17 @@
-struct IFGFOperator{N,Td,T,K}
+function centered_factor(K,x,yc)
+    K(x,yc)
+end
+
+function transfer_factor(K,x,yc,yc_parent)
+    centered_factor(K,x,yc)/centered_factor(K,x,yc_parent)
+end
+
+struct IFGFOperator{N,Td,T,K,U,V}
     kernel::K
     target_tree::TargetTree{N,Td}
     source_tree::SourceTree{N,Td,T}
+    target_dofs::Vector{U}
+    source_dofs::Vector{V}
 end
 
 kernel(op::IFGFOperator) = op.kernel
@@ -26,7 +36,7 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
     rmul!(B,a)
     # do some planning for the fft
     @timeit_debug "planning fft" begin
-        plan = FFTW.plan_r2r!(zeros(T,Ytree.data.p),FFTW.REDFT00;flags=FFTW.PATIENT)
+        plan = FFTW.plan_r2r!(zeros(eltype(T),Ytree.data.p),FFTW.REDFT00;flags=FFTW.PATIENT)
     end
     # iterate over all nodes in source tree, visiting children before parents
     for node in AbstractTrees.PostOrderDFS(Ytree)
@@ -50,22 +60,22 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
             interps = _construct_chebyshev_interpolants(node,plan)
         end
         # build interp to far field map
-        @timeit_debug "cone2far map" begin
-            cone2farfield = _cone_to_far(node,Xtree)
-        end
-        @timeit_debug "cone2parent map" begin
-            cone2parent   = _cone_to_parent(node)
-        end
+        # @timeit_debug "cone2far map" begin
+        #     cone2farfield = _cone_to_far(node,Xtree)
+        # end
+        # @timeit_debug "cone2parent map" begin
+        #     cone2parent   = _cone_to_parent(node)
+        # end
         # handle far targets by interpolation
         @timeit_debug "far interactions" begin
-            # _compute_far_interaction!(C,A,B,node,interps)
-            _compute_far_interaction!(C,A,B,node,interps,cone2farfield)
+            _compute_far_interaction!(C,A,B,node,interps)
+            # _compute_far_interaction!(C,A,B,node,interps,cone2farfield)
         end
         # transfer node's contribution to parent's interpolant
         isroot(node) && continue
         @timeit_debug "transfer to parent" begin
-            # _transfer_to_parent!(C,A,B,node,interps)
-            _transfer_to_parent!(C,A,B,node,interps,cone2parent)
+            _transfer_to_parent!(C,A,B,node,interps)
+            # _transfer_to_parent!(C,A,B,node,interps,cone2parent)
         end
         # free interpolation data
         empty!(node.data.interp_data)
@@ -108,7 +118,8 @@ function _construct_chebyshev_interpolants(node::SourceTree{N,Td,T},plan) where 
     for I in node.data.active_idxs
         _,vals     = node.data.interp_data[I]
         rec        = els[I]
-        poly       = chebfit!(vals,rec.low_corner,rec.high_corner,plan)
+        # poly       = chebfit!(vals,rec.low_corner,rec.high_corner,plan)
+        poly       = chebfit(vals,rec.low_corner,rec.high_corner)
         push!(interps,I=>poly)
     end
     return interps
@@ -116,9 +127,9 @@ end
 
 function _compute_near_interaction!(C,A::IFGFOperator,B,node)
     Xtree = target_tree(A)
-    Xpts  = Xtree.points
+    Xpts  = A.target_dofs
     Ytree = source_tree(A)
-    Ypts  = Ytree.points
+    Ypts  = A.source_dofs
     K     = kernel(A)
     J     = node.loc_idxs
     for near_target in node.data.near_list
@@ -136,7 +147,7 @@ end
 function _compute_own_interpolant!(C,A,B,node)
     Ytree = source_tree(A)
     T     = return_type(Ytree)
-    Ypts  = Ytree.points
+    Ypts  = A.source_dofs
     K     = kernel(A)
     J     = node.loc_idxs
     bbox  = node.bounding_box
@@ -146,8 +157,9 @@ function _compute_own_interpolant!(C,A,B,node)
         for i in eachindex(nodes)
             xi = nodes[i] # cartesian coordinate of node
             # add sum of factored part of kernel to the interpolation node
-            fact = 1/K(xi, xc)
+            fact = 1/centered_factor(K,xi,xc) # defaults to 1/K(xi,xc)
             for j in J
+                y = Ypts[j]
                 vals[i] += K(xi, Ypts[j])*fact*B[j]
             end
         end
@@ -174,7 +186,7 @@ end
 
 function _compute_far_interaction!(C,A,B,node,interps)
     Xtree = target_tree(A)
-    Xpts  = Xtree.points
+    Xpts  = A.target_dofs
     Ytree = source_tree(A)
     K     = kernel(A)
     bbox = node.bounding_box
@@ -183,12 +195,11 @@ function _compute_far_interaction!(C,A,B,node,interps)
     for far_target in node.data.far_list
         I = far_target.loc_idxs
         for i in I
-            x       = Xpts[i]
+            x       = Xpts[i] |> coords
             idxcone = cone_index(x, node)
             s       = cart2interp(x,node)
             poly    = interps[idxcone]
-            # @assert s ∈ els[idxcone]
-            C[i] += poly(s) * K(x, xc)
+            C[i] += poly(s) * centered_factor(K,x,xc)
         end
     end
     return nothing
@@ -196,7 +207,7 @@ end
 
 function _compute_far_interaction!(C,A,B,node,interps,cone2farfield)
     Xtree = target_tree(A)
-    Xpts  = Xtree.points
+    Xpts  = A.target_dofs
     K     = kernel(A)
     bbox = node.bounding_box
     xc   = center(bbox)
@@ -205,8 +216,7 @@ function _compute_far_interaction!(C,A,B,node,interps,cone2farfield)
         for i in idxs
             x       = Xpts[i]
             s       = cart2interp(x,node)
-            # @assert s ∈ els[idxcone]
-            C[i] += poly(s) * K(x, xc)
+            C[i] += poly(s) * centered_factor(K,x,xc)
         end
     end
     return nothing
@@ -245,12 +255,7 @@ function _transfer_to_parent!(C,A,B,node,interps)
             si        = cart2interp(xi,node)
             poly      = interps[idxcone]
             # transfer block's interpolant to parent's interpolants
-            scale = K(xi, xc) / K(xi, xc_parent)
-            # TODO: this scaling factor can often be computed more efficiently
-            # than two evaluations of the kernel followed by a division. We
-            # should define a few methods for the kernel `K` such as
-            # `scale_to_parent` and `analytic_factor` to make such evaluations faster.
-            vals[idxval] += poly(si) * scale
+            vals[idxval] += poly(si) * transfer_factor(K,xi,xc,xc_parent)
         end
     end
     return nothing
@@ -272,12 +277,7 @@ function _transfer_to_parent!(C,A,B,node,interps,cone2parent)
                 xi        = nodes[idxval]
                 si        = cart2interp(xi,node)
                 # transfer block's interpolant to parent's interpolants
-                scale = K(xi, xc) / K(xi, xc_parent)
-                # TODO: this scaling factor can often be computed more efficiently
-                # than two evaluations of the kernel followed by a division. We
-                # should define a few methods for the kernel `K` such as
-                # `scale_to_parent` and `analytic_factor` to make such evaluations faster.
-                vals[idxval] += poly(si) * scale
+                vals[idxval] += poly(si) * transfer_factor(K,xi,xc,xc_parent)
             end
         end
     end
