@@ -12,16 +12,21 @@ const k = 4π
 ppw     = 16
 dx      = λ/ppw
 
-pde = Elastostatic(dim=3,μ=1,λ=2)
+pde = Maxwell(dim=3,k=k)
 K   = SingleLayerKernel(pde)
 
 function IFGF.centered_factor(K::typeof(K),x,yc)
     r = coords(x)-yc
     d = norm(r)
-    1/d
+    g   = exp(im*k*d)/(4π*d)
+    gp  = im*k*g - g/d
+    gpp = im*k*gp - gp/d + g/d^2
+    # RRT = rvec*transpose(rvec) # rvec ⊗ rvecᵗ
+    #return g + 1/k^2*(gp/d + gpp - gp/d)
+    return g    # works fine!
 end
 
-const T = SVector{3,Float64}
+const T = SVector{3,ComplexF64}
 
 clear_entities!()
 geo = ParametricSurfaces.Sphere(;radius=1)
@@ -52,7 +57,7 @@ function ds_oscillatory(source)
     w = bbox.high_corner - bbox.low_corner |> maximum
     ds   = Float64.((1.0,π/2,π/2))
     δ    = k*w/2
-    if δ < Inf
+    if δ < 1
         return ds
     else
         return ds ./ δ
