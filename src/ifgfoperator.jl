@@ -32,7 +32,6 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
         length(node.loc_idxs) == 0 && continue
         # allocate necessary interpolation data and perform necessary
         # precomputations
-        els = ElementIterator(node.data.cart_mesh)
         @timeit_debug "allocate interpolant data" begin
             _allocate_data!(node)
         end
@@ -110,9 +109,7 @@ function _construct_chebyshev_interpolants(node::SourceTree{N,Td,T}) where {N,Td
 end
 
 function _compute_near_interaction!(C,A::IFGFOperator,B,node)
-    Xtree = target_tree(A)
     Xpts  = A.target_dofs
-    Ytree = source_tree(A)
     Ypts  = A.source_dofs
     K     = kernel(A)
     J     = node.loc_idxs
@@ -128,9 +125,7 @@ function _compute_near_interaction!(C,A::IFGFOperator,B,node)
     return nothing
 end
 
-function _compute_own_interpolant!(C,A,B,node)
-    Ytree = source_tree(A)
-    T     = return_type(Ytree)
+function _compute_own_interpolant!(C,A::IFGFOperator,B,node)
     Ypts  = A.source_dofs
     K     = kernel(A)
     J     = node.loc_idxs
@@ -152,9 +147,7 @@ function _compute_own_interpolant!(C,A,B,node)
 end
 
 function _compute_far_interaction!(C,A,B,node,interps)
-    Xtree = target_tree(A)
     Xpts  = A.target_dofs
-    Ytree = source_tree(A)
     K     = kernel(A)
     bbox = node.bounding_box
     xc   = center(bbox)
@@ -197,10 +190,10 @@ end
 
 # generic fallback. May need to be overloaded for specific kernels.
 function centered_factor(K,x,yc)
-    K(x,yc)
+    return K(x,yc)
 end
 
 # generic fallback. May need to be overloaded for specific kernels.
 function transfer_factor(K,x,yc,yc_parent)
-    centered_factor(K,x,yc)/centered_factor(K,x,yc_parent)
+    return centered_factor(K,x,yc)/centered_factor(K,x,yc_parent)
 end
