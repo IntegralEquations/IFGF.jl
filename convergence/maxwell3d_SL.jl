@@ -36,9 +36,7 @@ geo = ParametricSurfaces.Sphere(;radius=1)
 np  = ceil(2/dx)
 M   = meshgen(Γ,(np,np))
 msh = NystromMesh(M,Γ;order=1)
-Xdofs = msh.dofs
-Ydofs = Xdofs
-Xpts = qcoords(msh) |> collect
+Xpts = msh.dofs
 Ypts = Xpts
 nx = length(Xpts)
 ny = length(Ypts)
@@ -46,7 +44,7 @@ ny = length(Ypts)
 
 I   = rand(1:nx,1000)
 B   = rand(T,ny)
-tfull = @elapsed exa = [sum(K(Xdofs[i],Ydofs[j])*B[j] for j in 1:ny) for i in I]
+tfull = @elapsed exa = [sum(K(Xpts[i],Ypts[j])*B[j] for j in 1:ny) for i in I]
 @info "Estimated time for full product: $(tfull*nx/1000)"
 
 # trees
@@ -54,8 +52,8 @@ spl = DyadicSplitter(;nmax=100)
 
 function ds_oscillatory(source)
     # h    = radius(source.bounding_box)
-    bbox = source.bounding_box
-    w = bbox.high_corner - bbox.low_corner |> maximum
+    bbox = IFGF.container(source)
+    w = maximum(IFGF.high_corner(bbox)-IFGF.low_corner(bbox))
     ds   = Float64.((1.0,π/2,π/2))
     δ    = k*w/2
     if δ < 1
@@ -67,16 +65,15 @@ end
 
 # cone list
 p = (node) -> (3,5,5)
-source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=T)
-permute!(Ydofs,source.loc2glob)
+source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=T,Xdatatype=eltype(Xpts))
 target = initialize_target_tree(;points=Xpts,splitter=spl)
-# permute!(Xdofs,target.loc2glob)
 compute_interaction_list!(target,source,IFGF.admissible)
+#
 ds = (source) -> ds_oscillatory(source)
 @hprofile compute_cone_list!(source,p,ds)
 @info source.data.p
 C  = zeros(T,nx)
-A = IFGFOperator(K,target,source,Xdofs,Ydofs)
+A = IFGFOperator(K,target,source)
 @hprofile mul!(C,A,B)
 er = norm(C[I]-exa,2) / norm(exa,2)
 @info er,nx

@@ -16,9 +16,9 @@ uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 
 [[Compat]]
 deps = ["Base64", "Dates", "DelimitedFiles", "Distributed", "InteractiveUtils", "LibGit2", "Libdl", "LinearAlgebra", "Markdown", "Mmap", "Pkg", "Printf", "REPL", "Random", "SHA", "Serialization", "SharedArrays", "Sockets", "SparseArrays", "Statistics", "Test", "UUIDs", "Unicode"]
-git-tree-sha1 = "727e463cfebd0c7b999bbf3e9e7e16f254b94193"
+git-tree-sha1 = "6071cb87be6a444ac75fdbf51b8e7273808ce62f"
 uuid = "34da2185-b29b-5c13-b0c7-acf172513d20"
-version = "3.34.0"
+version = "3.35.0"
 
 [[DataStructures]]
 deps = ["Compat", "InteractiveUtils", "OrderedCollections"]
@@ -186,8 +186,8 @@ uuid = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
 
 [[WavePropBase]]
 deps = ["AbstractTrees", "LinearAlgebra", "OrderedCollections", "Pkg", "Printf", "QuadGK", "RecipesBase", "Requires", "StaticArrays", "Statistics"]
-git-tree-sha1 = "3be003e40fd7c0971f99afca37ff7fd84cf211b8"
-repo-rev = "main"
+git-tree-sha1 = "97f47e03dbe241e908f1e825dff6f78524156b06"
+repo-rev = "riarrieta/dev"
 repo-url = "https://github.com/WaveProp/WavePropBase.git"
 uuid = "91c5bd54-65f5-4719-ae3b-9579edfc4a0b"
 version = "0.1.0"
