@@ -141,25 +141,33 @@ function cart2interp(x,source::SourceTree{N}) where {N}
 end
 
 """
-    initialize_source_tree(;points,splitter)
+    initialize_source_tree(;Ypoints::Vector{V},datatype,splitter,Xdatatype) where V
 
 Create the tree-structure for clustering the source `points` using the splitting
 strategy of `splitter`, returning a `SourceTree` with an empty `data` field
 (i.e. `data = SourceTreeData()`).
+
+# Arguments
+- `Ypoints`: vector of source points.
+- `datatype`: return type of the IFGF method (e.g. `Float64` or `SVector{3,ComplexF64}`).
+- `splitter`: splitting strategy.
+- `Xdatatype`: type of target points.
 """
-function initialize_source_tree(;points::Vector{V},splitter,datatype,Xdatatype) where V
-    coords_datatype = points |> first |> coords |> typeof
+function initialize_source_tree(;Ypoints::Vector{V},datatype,splitter,Xdatatype) where V
+    coords_datatype = Ypoints |> first |> coords |> typeof
     @assert coords_datatype <: SVector
+    @assert isconcretetype(datatype)
+    @assert isconcretetype(Xdatatype)
     N = length(coords_datatype)
     Td = eltype(coords_datatype)
     source_tree_datatype = SourceTreeData{N,Td,datatype,Xdatatype}
-    source_tree = ClusterTree{source_tree_datatype}(points,splitter)
+    source_tree = ClusterTree{source_tree_datatype}(Ypoints,splitter)
     @assert source_tree isa SourceTree{N,Td,datatype}
     return source_tree
 end
 
 """
-    compute_interaction_list!(target_tree,source_tree,adm)
+    compute_interaction_list!(source_tree,target_tree,adm=admissible)
 
 For each node in `source_tree`, compute its `near_list` and `far_list`. The
 `near_list` contains all nodes in `target_tree` for which the interaction must be
@@ -171,8 +179,8 @@ The `adm` function is called through `adm(target,source)` to determine if
 on the children of both `target` and `source` (unless both are a leaves, in which
 case `target` is added to the `near_list` of source).
 """
-function compute_interaction_list!(target::TargetTree,
-                                   source::SourceTree,
+function compute_interaction_list!(source::SourceTree,
+                                   target::TargetTree,
                                    adm=admissible)
     # if either box is empty return immediately
     if length(source) == 0 || length(target) == 0
@@ -186,18 +194,18 @@ function compute_interaction_list!(target::TargetTree,
     elseif isleaf(target)
         # recurse on children of source
         for source_child in children(source)
-            compute_interaction_list!(target,source_child,adm)
+            compute_interaction_list!(source_child,target,adm)
         end
     elseif isleaf(source)
         # recurse on children of target
         for target_child in children(target)
-            compute_interaction_list!(target_child,source,adm)
+            compute_interaction_list!(source,target_child,adm)
         end
     else
         # recurse on children of target and source
         for source_child in children(source)
             for target_child in children(target)
-                compute_interaction_list!(target_child,source_child,adm)
+                compute_interaction_list!(source_child,target_child,adm)
             end
         end
     end
@@ -261,7 +269,7 @@ function initialize_cone_interpolant!(source::SourceTree,p_func,ds_func)
 end
 
 """
-    compute_cone_list!(target,source,order,p,ds)
+    compute_cone_list!(tree::SourceTree,p,ds_func)
 
 For each node in `source`, compute the cones which are necessary to cover
 both the target points on its `far_list` as well as the interpolation points on
