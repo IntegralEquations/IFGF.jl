@@ -36,6 +36,7 @@ export
     compute_interaction_list!,
     compute_cone_list!,
     clear_interpolants!,
+    cone_domain_size_func,
     # macros
     @hprofile
     # modules
