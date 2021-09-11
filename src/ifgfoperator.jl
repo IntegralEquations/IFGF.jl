@@ -63,40 +63,37 @@ end
 
 function _allocate_data!(node::SourceTree{N,Td,T}) where {N,Td,T}
     # leaves allocate their own interpolant vals
-    els = ElementIterator(node.data.cart_mesh)
     if isleaf(node)
-        for I in active_cone_idxs(node)
-            rec = els[I]
+        for (I,rec) in active_cone_idxs_and_domains(node)
             cheb   = cheb2nodes_iter(node.data.p,rec)
             inodes = map(si->interp2cart(si,node),cheb)
             vals   = zeros(T,node.data.p)
-            interp_data(node)[I] = (inodes, vals)
+            _set_interp_data!(node, I, (inodes,vals))
         end
     end
     # allocate parent data (if needed)
     if !isroot(node)
-        els_parent = ElementIterator(node.parent.data.cart_mesh)
-        for I in active_cone_idxs(node.parent)
-            haskey(interp_data(node.parent),I) && continue # already initialized
-            rec = els_parent[I]
+        parent_node = parent(node)
+        parent_cone_domains = cone_domains(parent_node)
+        for I in active_cone_idxs(parent_node)
+            haskey(interp_data(parent_node),I) && continue # already initialized
+            rec    = parent_cone_domains[I]
             cheb   = cheb2nodes_iter(node.parent.data.p,rec)
             inodes = map(si->interp2cart(si,node.parent),cheb)
             vals   = zeros(T,node.data.p)
-            interp_data(node.parent)[I] = (inodes,vals)
+            _set_interp_data!(parent_node, I, (inodes,vals))
         end
     end
     return node
 end
 
 function _construct_chebyshev_interpolants(node::SourceTree{N,Td,T}) where {N,Td,T}
-    els     = ElementIterator(node.data.cart_mesh)
     interps = Dict{CartesianIndex{N},TensorLagInterp{N,Td,T}}()
     p       = node.data.p
-    for I in active_cone_idxs(node)
-        _,vals    = interp_data(node)[I]
-        rec       = els[I]
-        lc = low_corner(rec)
-        uc = high_corner(rec)
+    for (I,rec) in active_cone_idxs_and_domains(node)
+        _,vals    = interp_data(node, I)
+        lc        = low_corner(rec)
+        uc        = high_corner(rec)
         nodes1d   = ntuple(d->cheb2nodes(p[d],lc[d],uc[d]),N)
         weights1d = ntuple(d->cheb2weights(p[d]),N)
         poly      = TensorLagInterp(vals,nodes1d,weights1d)
@@ -126,7 +123,7 @@ function _compute_own_interpolant!(C,A::IFGFOperator,B,node)
     bbox  = container(node)
     xc    = center(bbox)
     for I in active_cone_idxs(node)
-        nodes,vals = interp_data(node)[I]
+        nodes,vals = interp_data(node, I)
         for i in eachindex(nodes)
             xi = nodes[i] # cartesian coordinate of node
             # add sum of factored part of kernel to the interpolation node
@@ -145,7 +142,7 @@ function _compute_far_interaction!(C,A,B,node,interps)
     K     = kernel(A)
     bbox = container(node)
     xc   = center(bbox)
-    els = ElementIterator(node.data.cart_mesh)
+    # els = cone_domains(node)
     for far_target in far_list(node)
         for i in index_range(far_target)
             x       = Xpts[i]
@@ -168,7 +165,7 @@ function _transfer_to_parent!(C,A,B,node,interps)
     node_parent = parent(node)
     xc_parent = node_parent |> container |> center
     for idxinterp in active_cone_idxs(node_parent)
-        nodes,vals = interp_data(node_parent)[idxinterp]
+        nodes,vals = interp_data(node_parent, idxinterp)
         for idxval in eachindex(nodes)
             xi = nodes[idxval]
             idxcone   = cone_index(xi, node)
