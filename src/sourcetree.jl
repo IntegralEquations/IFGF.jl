@@ -271,7 +271,7 @@ function initialize_cone_interpolant!(source::SourceTree,p_func,ds_func)
     # initialize all cones needed to cover far field
     for far_target in far_list(source) 
         for x in points(far_target) # target points
-            idxcone  = cone_index(x,source)
+            idxcone = cone_index(x,source)
             idxcone ∈ active_cone_idxs(source) && continue
             _addtoconeidxs!(source,idxcone)
         end
@@ -280,7 +280,7 @@ function initialize_cone_interpolant!(source::SourceTree,p_func,ds_func)
     if !isroot(source)
         source_parent = parent(source)
         for rec in active_cone_domains(source_parent) # active HyperRectangles
-            cheb = cheb2nodes_iter(data.p,rec)
+            cheb = cheb2nodes_iter(source_parent.data.p,rec)
             for si in cheb # interpolation node in interpolation space
                 # interpolation node in physical space
                 xi = interp2cart(si,source_parent)
@@ -320,7 +320,6 @@ Compute a domain (as a `HyperRectangle`) in interpolation space for which
 `source` must provide a covering through its cone interpolants.
 """
 function compute_interpolation_domain(source::SourceTree{N,Td}) where {N,Td}
-    data = source.data
     lb = svector(i->typemax(Td),N) # lower bound
     ub = svector(i->typemin(Td),N) # upper bound
     # nodes on far_list
@@ -334,7 +333,7 @@ function compute_interpolation_domain(source::SourceTree{N,Td}) where {N,Td}
     if !isroot(source)
         source_parent = parent(source)
         for rec in active_cone_domains(source_parent)
-            cheb = cheb2nodes_iter(data.p,rec)
+            cheb = cheb2nodes_iter(source_parent.data.p,rec)
             for si in cheb
                 # interpolation node in physical space
                 xi = interp2cart(si,source_parent)
@@ -379,7 +378,7 @@ end
 Return the interpolation points, in cartesian coordinates, for the cone
 interpolant of index `I`.
 """
-function interpolation_points(source::SourceTree,p,I::CartesianIndex)
+function interpolation_points(source::SourceTree,I::CartesianIndex)
     data   = source.data
     els    = cone_domains(els)
     rec    = els[I]
