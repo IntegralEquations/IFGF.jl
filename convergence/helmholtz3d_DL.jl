@@ -47,8 +47,8 @@ tfull = @elapsed exa = [sum(K(Xpts[i],Ypts[j])*B[j] for j in 1:ny) for i in I]
 splitter = DyadicSplitter(;nmax=100)
 
 # cone list
-p  = (node) -> (3,5,5)
-ds = IFGF.cone_domain_size_func(k)
+p_func  = (node) -> (3,5,5)
+ds_func = IFGF.cone_domain_size_func(k)
 C  = zeros(T,nx)
 A  = IFGFOperator(K,Ypts,Xpts;datatype=T,splitter,p_func,ds_func,_profile=true)
 @hprofile mul!(C,A,B)

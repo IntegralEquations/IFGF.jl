@@ -17,6 +17,7 @@ using IFGF
         C     = zeros(nx)
         A     = IFGFOperator(K,Ypts,Xpts;datatype=Float64,splitter,p_func,ds_func)
         mul!(C,A,B)
+        @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
     end
     @testset "Tree" begin
@@ -32,6 +33,7 @@ using IFGF
         C     = zeros(nx)
         A     = IFGFOperator(K,Ypts,Xpts;datatype=Float64,splitter,p_func,ds_func)
         mul!(C,A,B)
+        @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
     end
 end
@@ -50,6 +52,7 @@ end
         C     = zeros(nx)
         A     = IFGFOperator(K,Ypts,Xpts;datatype=Float64,splitter,p_func,ds_func)
         mul!(C,A,B)
+        @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
     end
     @testset "Tree" begin
@@ -65,6 +68,7 @@ end
         C     = zeros(nx)
         A     = IFGFOperator(K,Ypts,Xpts;datatype=Float64,splitter,p_func,ds_func)
         mul!(C,A,B)
+        @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
     end
 end
@@ -82,5 +86,6 @@ end
     C     = zeros(nx)
     A     = IFGFOperator(K,Ypts,Xpts;datatype=Float64,splitter,p_func,ds_func)
     mul!(C,A,B)
+    @test size(A) == (nx,ny)
     @test C ≈ A_mat*B
 end

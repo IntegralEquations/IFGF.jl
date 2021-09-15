@@ -7,6 +7,17 @@ end
 kernel(op::IFGFOperator) = op.kernel
 target_tree(op::IFGFOperator) = op.target_tree
 source_tree(op::IFGFOperator) = op.source_tree
+Base.size(op::IFGFOperator, i) = size(op)[i]
+function Base.size(op::IFGFOperator) 
+    sizeX = op |> target_tree |> root_elements |> length
+    sizeY = op |> source_tree |> root_elements |> length
+    return (sizeX,sizeY)
+end
+function Base.:*(A::IFGFOperator{N,Td,T}, B) where {N,Td,T}
+    sizeX = size(A,1)
+    C = Vector{T}(undef, sizeX)
+    return mul!(C, A, B, true, false)
+end
 
 """
     IFGFOperator(kernel,
@@ -55,6 +66,8 @@ function IFGFOperator(kernel,
 end
 
 function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
+    # check compatible sizes
+    @assert size(A) == (length(C),length(B))
     # extract the row/target and column/source trees for convenience
     Xtree = target_tree(A)
     Ytree = source_tree(A)
