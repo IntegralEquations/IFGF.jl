@@ -76,7 +76,7 @@ end
 @testset "Near and far field" begin
     nx,ny  = 5000, 5000
     Xpts   = rand(SVector{2,Float64},nx)
-    Ypts   = [rand(SVector{2,Float64}) for _ in 1:ny]
+    Ypts   = [SVector(10,10)+rand(SVector{2,Float64}) for _ in 1:ny]
     splitter = DyadicSplitter(;nmax=20)
     p_func   =       x -> (10,10)
     ds_func  = x -> (1/4,2π/8)
@@ -88,4 +88,5 @@ end
     mul!(C,A,B)
     @test size(A) == (nx,ny)
     @test C ≈ A_mat*B
+    @test C == mul!(C,A,B) # recompute to verify that the result does not change
 end
