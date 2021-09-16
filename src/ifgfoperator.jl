@@ -7,15 +7,18 @@ end
 kernel(op::IFGFOperator) = op.kernel
 target_tree(op::IFGFOperator) = op.target_tree
 source_tree(op::IFGFOperator) = op.source_tree
-Base.size(op::IFGFOperator, i) = size(op)[i]
+Base.size(op::IFGFOperator,i) = size(op)[i]
 function Base.size(op::IFGFOperator) 
     sizeX = op |> target_tree |> root_elements |> length
     sizeY = op |> source_tree |> root_elements |> length
     return (sizeX,sizeY)
 end
-function Base.:*(A::IFGFOperator{N,Td,T}, B) where {N,Td,T}
-    sizeX = size(A,1)
-    C = Vector{T}(undef, sizeX)
+function Base.:*(A::IFGFOperator{N,Td,T}, B::AbstractVector) where {N,Td,T}
+    C = Vector{T}(undef, size(A,1))
+    return mul!(C, A, B, true, false)
+end
+function Base.:*(A::IFGFOperator{N,Td,T}, B::AbstractMatrix) where {N,Td,T}
+    C = Matrix{T}(undef, size(A,1), size(B,2))
     return mul!(C, A, B, true, false)
 end
 
@@ -65,7 +68,7 @@ function IFGFOperator(kernel,
     return ifgf
 end
 
-function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
+function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B::AbstractVector, a, b) where {N,Td,T}
     # check compatible sizes
     @assert size(A) == (length(C),length(B))
     # extract the row/target and column/source trees for convenience
@@ -116,6 +119,16 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
     end
     # permute output
     invpermute!(C,loc2glob(Xtree))
+    return C
+end
+function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B::AbstractMatrix, a, b) where {N,Td,T}
+    # check compatible sizes
+    @assert size(C) == (size(A,1),size(B,2))
+    @assert size(A,2) == size(B,1)
+    # compute product for each column
+    for (Bcol,Ccol) in zip(eachcol(B),eachcol(C))
+        mul!(Ccol, A, Bcol, a, b)
+    end
     return C
 end
 
