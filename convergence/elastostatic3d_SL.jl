@@ -12,10 +12,11 @@ const k = 4π
 ppw     = 16
 dx      = λ/ppw
 
-pde = Elastostatic(dim=3,μ=1,λ=λ)
+pde = Elastostatic(dim=3,μ=1,λ=2)
 K   = SingleLayerKernel(pde)
 
-function IFGF.centered_factor(K::typeof(K),x,yc)
+function IFGF.centered_factor(K::typeof(K),x,ysource::SourceTree)
+    yc = center(ysource)
     r = coords(x)-yc
     d = norm(r)
     1/d
@@ -46,7 +47,7 @@ splitter = DyadicSplitter(;nmax=100)
 
 # cone list
 p_func  = (node) -> (3,5,5)
-ds_func = IFGF.cone_domain_size_func(k)
+ds_func = IFGF.cone_domain_size_func(nothing)
 C  = zeros(T,nx)
 A  = IFGFOperator(K,Ypts,Xpts;datatype=T,splitter,p_func,ds_func,_profile=true)
 @hprofile mul!(C,A,B)

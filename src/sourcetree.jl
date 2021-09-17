@@ -43,6 +43,7 @@ interp_data(t::SourceTree)      = t.data.interp_data
 interp_data(t::SourceTree,idx)  = interp_data(t)[idx]
 far_list(t::SourceTree)         = t.data.far_list
 near_list(t::SourceTree)        = t.data.near_list
+center(t::SourceTree)           = t |> container |> center
 cone_domains(t::SourceTree)     = cone_interp_msh(t) |> ElementIterator # iterator of HyperRectangles
 
 """
@@ -226,16 +227,16 @@ function admissible(target::TargetTree{N},source::SourceTree{N},η=sqrt(N)/N) wh
 end
 
 """
-    cone_domain_size_func()
     cone_domain_size_func(k)
+    cone_domain_size_func(::Nothing)
 
 Returns the function `ds_func(s::SourceTree)` that computes the size
 of the cone interpolation domains. If a wavenumber `k` is passed, then 
 the cone domain sizes are computed in terms of `k` and the bounding box size of `s`.
-This is used in oscillatory kernels, e.g. Helmholtz. If no argument is passed, the
+This is used in oscillatory kernels, e.g. Helmholtz. If `nothing` is passed, the
 cone domain sizes are set constant. This is used in static kernels, e.g. Laplace.
 """
-function cone_domain_size_func()
+function cone_domain_size_func(::Nothing)
     # static case (e.g. Laplace)
     function ds_func(::SourceTree{N}) where N
         N != 3 && notimplemented()
