@@ -29,12 +29,17 @@ function SourceTreeData{N,Td,T}() where {N,Td,T}
     far_list  = Vector{TargetTree{N,Td}}()
     near_list = Vector{TargetTree{N,Td}}()
     p = ntuple(i->0,N)
-    SourceTreeData{N,Td,T}(msh,idxs,interps,far_list,near_list,p)
+    return SourceTreeData{N,Td,T}(msh,idxs,interps,far_list,near_list,p)
 end
 
 const SourceTree{N,Td,T} = ClusterTree{N,Td,SourceTreeData{N,Td,T}}
-
 return_type(::SourceTree{N,Td,T}) where {N,Td,T} = T
+cart_mesh(t::SourceTree) = t.data.cart_mesh
+interps(t::SourceTree)   = t.data.interps
+far_list(t::SourceTree)  = t.data.far_list
+near_list(t::SourceTree) = t.data.near_list
+_addtofarlist!(s::SourceTree,t::TargetTree) = push!(far_list(s),t)
+_addtonearlist!(s::SourceTree,t::TargetTree) = push!(near_list(s),t)
 
 """
     interp2cart(s,source::SourceTree)
@@ -90,11 +95,6 @@ function cart2interp(x,source::SourceTree{N}) where {N}
     end
 end
 
-cart_mesh(t::SourceTree) = t |> data |> cart_mesh
-interps(t::SourceTree)   = t |> data |> interps
-far_list(t::SourceTree)   = t |> data |> far_list
-near_list(t::SourceTree)   = t |> data |> near_list
-
 """
     initialize_source_tree(;points,splitter)
 
@@ -120,16 +120,18 @@ The `adm` function is called through `adm(target,source)` to determine if
 on the children of both `target` and `source` (unless both are a leaves, in which
 case `target` is added to the `near_list` of source).
 """
-function compute_interaction_list!(target::TargetTree,source::SourceTree{N,Td,T},adm) where {N,Td,T}
+function compute_interaction_list!(target::TargetTree,
+                                   source::SourceTree{N,Td,T},
+                                   adm=admissible) where {N,Td,T}
     # if either box is empty return immediately
     if length(source.loc_idxs) == 0 || length(target.loc_idxs) == 0
         return nothing
     end
     # handle the various possibilities
     if adm(target,source)
-        push!(source.data.far_list,target)
+        _addtofarlist!(source,target)
     elseif isleaf(target) && isleaf(source)
-        push!(source.data.near_list,target)
+        _addtonearlist!(source,target)
     elseif isleaf(target)
         # recurse on children of source
         for source_child in children(source)
@@ -161,13 +163,13 @@ function admissible(target::TargetTree{N},source::SourceTree{N},η=sqrt(N)/N) wh
     # The same parameter η is used to construct the interpolation domain where
     # `s=h/r ∈ (0,η)` with η<1. This assures that target points which must be
     # interpolated are inside the interpolation domain.
-    dc > h/η
+    return dc > h/η
 end
 
 function ds_oscillatory(source,k)
     N    = ambient_dimension(source)
     h    = radius(source.bounding_box)
-    1/(k*h) * @SVector ones(N)
+    return 1/(k*h) * @SVector ones(N)
 end
 
 function initialize_cone_interpolant!(source::SourceTree{N,Td,T},p_func,ds_func) where {N,Td,T}
@@ -292,7 +294,7 @@ function cone_index(x,tree::SourceTree)
         end
         i
     end
-    CartesianIndex(I)
+    return CartesianIndex(I)
 end
 
 """
@@ -306,7 +308,7 @@ function interpolation_points(source::SourceTree,p,I::CartesianIndex)
     els    = ElementIterator(data.cart_mesh)
     rec    = els[I]
     cheb   = cheb2nodes_iter(data.p,rec.low_corner,rec.high_corner)
-    map(si -> interp2cart(si,source),cheb)
+    return map(si -> interp2cart(si,source),cheb)
 end
 
 ## Plot recipes
