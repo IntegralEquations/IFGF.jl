@@ -225,10 +225,37 @@ function admissible(target::TargetTree{N},source::SourceTree{N},η=sqrt(N)/N) wh
     return dc > h/η
 end
 
-function ds_oscillatory(source,k)
-    N    = ambient_dimension(source)
-    h    = radius(source.bounding_box)
-    return 1/(k*h) * @SVector ones(N)
+"""
+    cone_domain_size_func()
+    cone_domain_size_func(k)
+
+Returns the function `ds_func(s::SourceTree)` that computes the size
+of the cone interpolation domains. If a wavenumber `k` is passed, then 
+the cone domain sizes are computed in terms of `k` and the bounding box size of `s`.
+This is used in oscillatory kernels, e.g. Helmholtz. If no argument is passed, the
+cone domain sizes are set constant. This is used in static kernels, e.g. Laplace.
+"""
+function cone_domain_size_func()
+    # static case (e.g. Laplace)
+    function ds_func(::SourceTree{N}) where N
+        N != 3 && notimplemented()
+        ds = Float64.((1,π/2,π/2))
+        return ds
+    end
+    return ds_func
+end
+function cone_domain_size_func(k)
+    # oscillatory case (e.g. Helmholtz, Maxwell)
+    # k: wavenumber
+    function ds_func(source::SourceTree{N}) where N
+        N != 3 && notimplemented()
+        bbox = IFGF.container(source)
+        w    = maximum(IFGF.high_corner(bbox)-IFGF.low_corner(bbox))
+        ds   = Float64.((1,π/2,π/2))
+        δ    = k*w/2
+        return ds ./ max(δ,1)
+    end
+    return ds_func
 end
 
 function initialize_cone_interpolant!(source::SourceTree,p_func,ds_func)
