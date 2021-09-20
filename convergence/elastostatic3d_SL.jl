@@ -12,7 +12,7 @@ const k = 4π
 ppw     = 16
 dx      = λ/ppw
 
-pde = Elastostatic(dim=3,μ=1,λ=2)
+pde = Elastostatic(dim=3,μ=1,λ=λ)
 K   = SingleLayerKernel(pde)
 
 function IFGF.centered_factor(K::typeof(K),x,yc)
