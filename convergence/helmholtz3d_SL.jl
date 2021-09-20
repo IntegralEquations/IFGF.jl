@@ -15,7 +15,8 @@ dx      = λ/ppw
 pde = Helmholtz(dim=3,k=k)
 K   = SingleLayerKernel(pde)
 
-function IFGF.centered_factor(::typeof(K),x,yc)
+function IFGF.centered_factor(::typeof(K),x,ysource::SourceTree)
+    yc = center(ysource)
     r = coords(x)-yc
     d = norm(r)
     exp(im*k*d)/d

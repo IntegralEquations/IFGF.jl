@@ -15,7 +15,8 @@ dx      = λ/ppw
 pde = Maxwell(dim=3,k=k)
 K   = SingleLayerKernel(pde)
 
-function IFGF.centered_factor(K::typeof(K),x,yc)
+function IFGF.centered_factor(K::typeof(K),x,ysource::SourceTree)
+    yc = center(ysource)
     r = coords(x)-yc
     d = norm(r)
     g   = exp(im*k*d)/(4π*d)

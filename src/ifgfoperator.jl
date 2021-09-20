@@ -176,14 +176,12 @@ end
 function _compute_own_interpolant!(A::IFGFOperator,B,node)
     Ypts  = A |> source_tree |> root_elements
     K     = kernel(A)
-    bbox  = container(node)
-    xc    = center(bbox)
     for I in active_cone_idxs(node)
         nodes,vals = interp_data(node, I)
         for i in eachindex(nodes)
             xi = nodes[i] # cartesian coordinate of node
             # add sum of factored part of kernel to the interpolation node
-            fact = 1/centered_factor(K,xi,xc) # defaults to 1/K
+            fact = 1/centered_factor(K,xi,node) # defaults to 1/K
             for j in index_range(node)
                 y = Ypts[j]
                 vals[i] += K(xi, y)*fact*B[j]
@@ -211,8 +209,6 @@ end
 function _compute_far_interaction!(C,A::IFGFOperator,node,interps)
     Xpts  = A |> target_tree |> root_elements
     K     = kernel(A)
-    bbox = container(node)
-    xc   = center(bbox)
     # els = cone_domains(node)
     for far_target in far_list(node)
         for i in index_range(far_target)
@@ -221,7 +217,7 @@ function _compute_far_interaction!(C,A::IFGFOperator,node,interps)
             s       = cart2interp(coords(x),node)
             poly    = interps[idxcone]
             # @assert s ∈ els[idxcone]
-            C[i] += poly(s) * centered_factor(K,x,xc)
+            C[i] += poly(s) * centered_factor(K,x,node)
         end
     end
     return nothing
@@ -229,10 +225,7 @@ end
 
 function _transfer_to_parent!(A::IFGFOperator,node,interps)
     K     = kernel(A)
-    bbox = container(node)
-    xc   = center(bbox)
     node_parent = parent(node)
-    xc_parent = node_parent |> container |> center
     for idxinterp in active_cone_idxs(node_parent)
         nodes,vals = interp_data(node_parent, idxinterp)
         for idxval in eachindex(nodes)
@@ -241,18 +234,20 @@ function _transfer_to_parent!(A::IFGFOperator,node,interps)
             si        = cart2interp(xi,node)
             poly      = interps[idxcone]
             # transfer block's interpolant to parent's interpolants
-            vals[idxval] += poly(si) * transfer_factor(K,xi,xc,xc_parent)
+            vals[idxval] += poly(si) * transfer_factor(K,xi,node)
         end
     end
     return nothing
 end
 
 # generic fallback. May need to be overloaded for specific kernels.
-function centered_factor(K,x,yc)
+function centered_factor(K,x,ysource::SourceTree)
+    yc = center(ysource)
     return K(x,yc)
 end
 
 # generic fallback. May need to be overloaded for specific kernels.
-function transfer_factor(K,x,yc,yc_parent)
-    return centered_factor(K,x,yc)/centered_factor(K,x,yc_parent)
+function transfer_factor(K,x,ysource::SourceTree)
+    yparent = parent(ysource)
+    return centered_factor(K,x,ysource)/centered_factor(K,x,yparent)
 end
