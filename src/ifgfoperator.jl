@@ -1,11 +1,8 @@
 struct IFGFOperator{N,Td,T,K,U,V}
     kernel::K
-    target_tree::TargetTree{N,Td}
-    source_tree::SourceTree{N,Td,T}
-    target_dofs::Vector{U}
-    source_dofs::Vector{V}
+    target_tree::TargetTree{N,Td,U}
+    source_tree::SourceTree{N,Td,T,V,U}
 end
-IFGFOperator(K,target::TargetTree,source::SourceTree) = IFGFOperator(K,target,source,target.points,source.points)
 
 kernel(op::IFGFOperator) = op.kernel
 target_tree(op::IFGFOperator) = op.target_tree
@@ -21,15 +18,15 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
     # multiplication is performed by first defining B <-- Pc*B, and C <--
     # inv(Pr)*C, doing the multiplication with the permuted entries, and then
     # permuting the result  C <-- Pr*C at the end.
-        # permute input
-    B         = B[Ytree.loc2glob]
-    C         = permute!(C,Xtree.loc2glob)
+    # permute input
+    B = B[loc2glob(Ytree)]  # this makes a copy of B
+    C = permute!(C,loc2glob(Xtree))
     # multiply at the beginning by `a` and `b` and be done with it
     rmul!(C,b)
     rmul!(B,a)
     # iterate over all nodes in source tree, visiting children before parents
     for node in AbstractTrees.PostOrderDFS(Ytree)
-        length(node.loc_idxs) == 0 && continue
+        length(node) == 0 && continue
         # allocate necessary interpolation data and perform necessary
         # precomputations
         @timeit_debug "allocate interpolant data" begin
@@ -57,10 +54,10 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
             _transfer_to_parent!(C,A,B,node,interps)
         end
         # free interpolation data
-        empty!(node.data.interp_data)
+        _empty_interp_data!(node)
     end
     # permute output
-    permute!(C,Xtree.glob2loc)
+    invpermute!(C,loc2glob(Xtree))
     return C
 end
 
@@ -68,24 +65,24 @@ function _allocate_data!(node::SourceTree{N,Td,T}) where {N,Td,T}
     # leaves allocate their own interpolant vals
     els = ElementIterator(node.data.cart_mesh)
     if isleaf(node)
-        for I in node.data.active_idxs
+        for I in active_cone_idxs(node)
             rec = els[I]
-            cheb   = cheb2nodes_iter(node.data.p,rec.low_corner,rec.high_corner)
+            cheb   = cheb2nodes_iter(node.data.p,rec)
             inodes = map(si->interp2cart(si,node),cheb)
             vals   = zeros(T,node.data.p)
-            node.data.interp_data[I] = (inodes, vals)
+            interp_data(node)[I] = (inodes, vals)
         end
     end
     # allocate parent data (if needed)
     if !isroot(node)
         els_parent = ElementIterator(node.parent.data.cart_mesh)
-        for I in node.parent.data.active_idxs
-            haskey(node.parent.data.interp_data,I) && continue # already initialized
+        for I in active_cone_idxs(node.parent)
+            haskey(interp_data(node.parent),I) && continue # already initialized
             rec = els_parent[I]
-            cheb   = cheb2nodes_iter(node.parent.data.p,rec.low_corner,rec.high_corner)
+            cheb   = cheb2nodes_iter(node.parent.data.p,rec)
             inodes = map(si->interp2cart(si,node.parent),cheb)
             vals   = zeros(T,node.data.p)
-            node.parent.data.interp_data[I] = (inodes,vals)
+            interp_data(node.parent)[I] = (inodes,vals)
         end
     end
     return node
@@ -95,11 +92,11 @@ function _construct_chebyshev_interpolants(node::SourceTree{N,Td,T}) where {N,Td
     els     = ElementIterator(node.data.cart_mesh)
     interps = Dict{CartesianIndex{N},TensorLagInterp{N,Td,T}}()
     p       = node.data.p
-    for I in node.data.active_idxs
-        _,vals     = node.data.interp_data[I]
-        rec        = els[I]
-        lc = rec.low_corner
-        uc = rec.high_corner
+    for I in active_cone_idxs(node)
+        _,vals    = interp_data(node)[I]
+        rec       = els[I]
+        lc = low_corner(rec)
+        uc = high_corner(rec)
         nodes1d   = ntuple(d->cheb2nodes(p[d],lc[d],uc[d]),N)
         weights1d = ntuple(d->cheb2weights(p[d]),N)
         poly      = TensorLagInterp(vals,nodes1d,weights1d)
@@ -109,15 +106,13 @@ function _construct_chebyshev_interpolants(node::SourceTree{N,Td,T}) where {N,Td
 end
 
 function _compute_near_interaction!(C,A::IFGFOperator,B,node)
-    Xpts  = A.target_dofs
-    Ypts  = A.source_dofs
-    K     = kernel(A)
-    J     = node.loc_idxs
-    for near_target in node.data.near_list
+    Xpts = A |> target_tree |> root_elements
+    Ypts = A |> source_tree |> root_elements
+    K    = kernel(A)
+    for near_target in near_list(node)
         # near targets use direct evaluation
-        I = near_target.loc_idxs
-        for i in I
-            for j in J
+        for i in index_range(near_target)
+            for j in index_range(node)
                 C[i] += K(Xpts[i], Ypts[j]) * B[j]
             end
         end
@@ -126,18 +121,17 @@ function _compute_near_interaction!(C,A::IFGFOperator,B,node)
 end
 
 function _compute_own_interpolant!(C,A::IFGFOperator,B,node)
-    Ypts  = A.source_dofs
+    Ypts  = A |> source_tree |> root_elements
     K     = kernel(A)
-    J     = node.loc_idxs
-    bbox  = node.bounding_box
+    bbox  = container(node)
     xc    = center(bbox)
-    for I in node.data.active_idxs
-        nodes,vals = node.data.interp_data[I]
+    for I in active_cone_idxs(node)
+        nodes,vals = interp_data(node)[I]
         for i in eachindex(nodes)
             xi = nodes[i] # cartesian coordinate of node
             # add sum of factored part of kernel to the interpolation node
             fact = 1/centered_factor(K,xi,xc) # defaults to 1/K
-            for j in J
+            for j in index_range(node)
                 y = Ypts[j]
                 vals[i] += K(xi, y)*fact*B[j]
             end
@@ -147,16 +141,15 @@ function _compute_own_interpolant!(C,A::IFGFOperator,B,node)
 end
 
 function _compute_far_interaction!(C,A,B,node,interps)
-    Xpts  = A.target_dofs
+    Xpts  = A |> target_tree |> root_elements
     K     = kernel(A)
-    bbox = node.bounding_box
+    bbox = container(node)
     xc   = center(bbox)
     els = ElementIterator(node.data.cart_mesh)
-    for far_target in node.data.far_list
-        I = far_target.loc_idxs
-        for i in I
+    for far_target in far_list(node)
+        for i in index_range(far_target)
             x       = Xpts[i]
-            idxcone = cone_index(coords(x), node)
+            idxcone = cone_index(coords(x),node)
             s       = cart2interp(coords(x),node)
             poly    = interps[idxcone]
             # @assert s ∈ els[idxcone]
@@ -170,12 +163,12 @@ function _transfer_to_parent!(C,A,B,node,interps)
     K     = kernel(A)
     Ytree = source_tree(A)
     T     = return_type(Ytree)
-    bbox = node.bounding_box
+    bbox = container(node)
     xc   = center(bbox)
-    parent    = node.parent
-    xc_parent = parent.bounding_box |> center
-    for idxinterp in parent.data.active_idxs
-        nodes,vals = parent.data.interp_data[idxinterp]
+    node_parent = parent(node)
+    xc_parent = node_parent |> container |> center
+    for idxinterp in active_cone_idxs(node_parent)
+        nodes,vals = interp_data(node_parent)[idxinterp]
         for idxval in eachindex(nodes)
             xi = nodes[idxval]
             idxcone   = cone_index(xi, node)
