@@ -1,13 +1,10 @@
-const NodesAndVals{N,Td,T} = Tuple{Array{SVector{N,Td},N},Array{T,N}}
 
-mutable struct SourceTreeData{N,Td,T,U}
+mutable struct SourceTreeData{N,Td,U}
     # mesh of cone interpolation domains
     # it defines HyperRectangles coordinates in interpolation coordinates `s`
     cone_interp_msh::UniformCartesianMesh{N,Td}
     # active cone indices
     active_cone_idxs::Set{CartesianIndex{N}}
-    # mapping from an element `I` in `active_cone_idxs` to the cheb nodes and values
-    interp_data::Dict{CartesianIndex{N},NodesAndVals{N,Td,T}}
     # elements that can be interpolated
     far_list::Vector{TargetTree{N,Td,U}}
     # elements that cannot be interpolated
@@ -15,7 +12,7 @@ mutable struct SourceTreeData{N,Td,T,U}
     # number of interpolation points per cone per dimension
     p::NTuple{N,Int}
 end
-function SourceTreeData{N,Td,T,U}() where {N,Td,T,U}
+function SourceTreeData{N,Td,U}() where {N,Td,U}
     if N == 2
         domain = HyperRectangle{2,Td}((0,0),(0,0))
         msh    = UniformCartesianMesh(domain,(1,1))
@@ -26,21 +23,17 @@ function SourceTreeData{N,Td,T,U}() where {N,Td,T,U}
         notimplemented()
     end
     idxs      = Set{CartesianIndex{N}}()
-    interps   = Dict{CartesianIndex{N},NodesAndVals{N,Td,T}}()
     far_list  = Vector{TargetTree{N,Td,U}}()
     near_list = Vector{TargetTree{N,Td,U}}()
     p = ntuple(i->0,N)
-    return SourceTreeData{N,Td,T,U}(msh,idxs,interps,far_list,near_list,p)
+    return SourceTreeData{N,Td,U}(msh,idxs,far_list,near_list,p)
 end
 
-const SourceTree{N,Td,T,V,U} = ClusterTree{V,HyperRectangle{N,Td},SourceTreeData{N,Td,T,U}}
+const SourceTree{N,Td,V,U} = ClusterTree{V,HyperRectangle{N,Td},SourceTreeData{N,Td,U}}
 
 # getters
-return_type(::SourceTree{N,Td,T}) where {N,Td,T} = T
 cone_interp_msh(t::SourceTree)  = t.data.cone_interp_msh
 active_cone_idxs(t::SourceTree) = t.data.active_cone_idxs
-interp_data(t::SourceTree)      = t.data.interp_data
-interp_data(t::SourceTree,idx)  = interp_data(t)[idx]
 far_list(t::SourceTree)         = t.data.far_list
 near_list(t::SourceTree)        = t.data.near_list
 center(t::SourceTree)           = t |> container |> center
@@ -76,11 +69,6 @@ end
 _addtofarlist!(s::SourceTree,t::TargetTree)  = push!(far_list(s),t)
 _addtonearlist!(s::SourceTree,t::TargetTree) = push!(near_list(s),t)
 _addtoconeidxs!(s::SourceTree,idxcone)       = push!(active_cone_idxs(s),idxcone)
-_empty_interp_data!(t::SourceTree)           = empty!(interp_data(t))
-function _set_interp_data!(s::SourceTree,idx,data)
-    interp_data(s)[idx] = data
-    return nothing
-end
 function _init_cone_interp_msh!(s::SourceTree,domain,ds)
     s.data.cone_interp_msh = UniformCartesianMesh(domain;step=ds)
     return nothing
@@ -154,16 +142,15 @@ strategy of `splitter`, returning a `SourceTree` with an empty `data` field
 - `splitter`: splitting strategy.
 - `Xdatatype`: type of target points.
 """
-function initialize_source_tree(;Ypoints::Vector{V},datatype,splitter,Xdatatype) where V
+function initialize_source_tree(;Ypoints::Vector{V},splitter,Xdatatype) where V
     coords_datatype = Ypoints |> first |> coords |> typeof
     @assert coords_datatype <: SVector
-    @assert isconcretetype(datatype)
     @assert isconcretetype(Xdatatype)
     N = length(coords_datatype)
     Td = eltype(coords_datatype)
-    source_tree_datatype = SourceTreeData{N,Td,datatype,Xdatatype}
+    source_tree_datatype = SourceTreeData{N,Td,Xdatatype}
     source_tree = ClusterTree{source_tree_datatype}(Ypoints,splitter)
-    @assert source_tree isa SourceTree{N,Td,datatype}
+    @assert source_tree isa SourceTree{N,Td}
     return source_tree
 end
 
@@ -387,6 +374,7 @@ function interpolation_points(source::SourceTree,I::CartesianIndex)
     return map(si -> interp2cart(si,source),cheb)
 end
 
+#=
 ## Plot recipes
 
 struct PlotInterpolationPoints end
@@ -441,3 +429,4 @@ end
         PlotInterpolationPoints(),tree
     end
 end
+=#

@@ -55,7 +55,7 @@ splitter = DyadicSplitter(;nmax=100)
 p_func = (node) -> (3,5,5)
 ds_func = IFGF.cone_domain_size_func(k)
 C  = zeros(T,nx)
-A  = IFGFOperator(K,Ypts,Xpts;datatype=T,splitter,p_func,ds_func,_profile=true)
+A  = IFGFOperator(K,Ypts,Xpts;splitter,p_func,ds_func,_profile=true)
 @hprofile mul!(C,A,B)
 er = norm(C[I]-exa,2) / norm(exa,2)
 @info er,nx

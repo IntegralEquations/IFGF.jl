@@ -17,7 +17,7 @@ using IFGF
         B     = rand(ny)
         B_mat = rand(ny,nz)
         C     = zeros(nx)
-        A     = IFGFOperator(K,Ypts,Xpts;datatype=Float64,splitter,p_func,ds_func)
+        A     = IFGFOperator(K,Ypts,Xpts;splitter,p_func,ds_func)
         mul!(C,A,B)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
@@ -36,7 +36,7 @@ using IFGF
         B     = rand(ny)
         B_mat = rand(ny,nz)
         C     = zeros(nx)
-        A     = IFGFOperator(K,Ypts,Xpts;datatype=Float64,splitter,p_func,ds_func)
+        A     = IFGFOperator(K,Ypts,Xpts;splitter,p_func,ds_func)
         mul!(C,A,B)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
@@ -58,7 +58,7 @@ end
         B     = rand(ny)
         B_mat = rand(ny,nz)
         C     = zeros(nx)
-        A     = IFGFOperator(K,Ypts,Xpts;datatype=Float64,splitter,p_func,ds_func)
+        A     = IFGFOperator(K,Ypts,Xpts;splitter,p_func,ds_func)
         mul!(C,A,B)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
@@ -77,7 +77,7 @@ end
         B     = rand(ny)
         B_mat = rand(ny,nz)
         C     = zeros(nx)
-        A     = IFGFOperator(K,Ypts,Xpts;datatype=Float64,splitter,p_func,ds_func)
+        A     = IFGFOperator(K,Ypts,Xpts;splitter,p_func,ds_func)
         mul!(C,A,B)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
@@ -98,7 +98,7 @@ end
     B     = rand(ny)
     B_mat = rand(ny,nz)
     C     = zeros(nx)
-    A     = IFGFOperator(K,Ypts,Xpts;datatype=Float64,splitter,p_func,ds_func)
+    A     = IFGFOperator(K,Ypts,Xpts;splitter,p_func,ds_func)
     mul!(C,A,B)
     @test size(A) == (nx,ny)
     @test C ≈ A_mat*B
