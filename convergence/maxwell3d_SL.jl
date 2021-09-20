@@ -23,6 +23,7 @@ function IFGF.centered_factor(K::typeof(K),x,yc)
     gpp = im*k*gp - gp/d + g/d^2
     # RRT = rvec*transpose(rvec) # rvec ⊗ rvecᵗ
     #return g + 1/k^2*(gp/d + gpp - gp/d)
+    #return (1+im/(k*d)-1/(k*d)^2)*g    
     return g    # works fine!
 end
 
