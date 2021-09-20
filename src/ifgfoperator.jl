@@ -84,7 +84,7 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
         # leaf blocks need to update their own interpolant values since they
         # have no children
         @timeit_debug "leaf interpolants" begin
-            isleaf(node) && _compute_own_interpolant!(C,A,B,node)
+            isleaf(node) && _compute_own_interpolant!(A,B,node)
         end
         #
         @timeit_debug "construct chebyshev interpolants" begin
@@ -92,12 +92,12 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
         end
         # handle far targets by interpolation
         @timeit_debug "far interactions" begin
-            _compute_far_interaction!(C,A,B,node,interps)
+            _compute_far_interaction!(C,A,node,interps)
         end
         # transfer node's contribution to parent's interpolant
         isroot(node) && continue
         @timeit_debug "transfer to parent" begin
-            _transfer_to_parent!(C,A,B,node,interps)
+            _transfer_to_parent!(A,node,interps)
         end
         # free interpolation data
         _empty_interp_data!(node)
@@ -133,21 +133,6 @@ function _allocate_data!(node::SourceTree{N,Td,T}) where {N,Td,T}
     return node
 end
 
-function _construct_chebyshev_interpolants(node::SourceTree{N,Td,T}) where {N,Td,T}
-    interps = Dict{CartesianIndex{N},TensorLagInterp{N,Td,T}}()
-    p       = node.data.p
-    for (I,rec) in active_cone_idxs_and_domains(node)
-        _,vals    = interp_data(node, I)
-        lc        = low_corner(rec)
-        uc        = high_corner(rec)
-        nodes1d   = ntuple(d->cheb2nodes(p[d],lc[d],uc[d]),N)
-        weights1d = ntuple(d->cheb2weights(p[d]),N)
-        poly      = TensorLagInterp(vals,nodes1d,weights1d)
-        push!(interps,I=>poly)
-    end
-    return interps
-end
-
 function _compute_near_interaction!(C,A::IFGFOperator,B,node)
     Xpts = A |> target_tree |> root_elements
     Ypts = A |> source_tree |> root_elements
@@ -163,7 +148,7 @@ function _compute_near_interaction!(C,A::IFGFOperator,B,node)
     return nothing
 end
 
-function _compute_own_interpolant!(C,A::IFGFOperator,B,node)
+function _compute_own_interpolant!(A::IFGFOperator,B,node)
     Ypts  = A |> source_tree |> root_elements
     K     = kernel(A)
     bbox  = container(node)
@@ -183,7 +168,22 @@ function _compute_own_interpolant!(C,A::IFGFOperator,B,node)
     return nothing
 end
 
-function _compute_far_interaction!(C,A::IFGFOperator,B,node,interps)
+function _construct_chebyshev_interpolants(node::SourceTree{N,Td,T}) where {N,Td,T}
+    interps = Dict{CartesianIndex{N},TensorLagInterp{N,Td,T}}()
+    p       = node.data.p
+    for (I,rec) in active_cone_idxs_and_domains(node)
+        _,vals    = interp_data(node, I)
+        lc        = low_corner(rec)
+        uc        = high_corner(rec)
+        nodes1d   = ntuple(d->cheb2nodes(p[d],lc[d],uc[d]),N)
+        weights1d = ntuple(d->cheb2weights(p[d]),N)
+        poly      = TensorLagInterp(vals,nodes1d,weights1d)
+        push!(interps,I=>poly)
+    end
+    return interps
+end
+
+function _compute_far_interaction!(C,A::IFGFOperator,node,interps)
     Xpts  = A |> target_tree |> root_elements
     K     = kernel(A)
     bbox = container(node)
@@ -202,7 +202,7 @@ function _compute_far_interaction!(C,A::IFGFOperator,B,node,interps)
     return nothing
 end
 
-function _transfer_to_parent!(C,A::IFGFOperator,B,node,interps)
+function _transfer_to_parent!(A::IFGFOperator,node,interps)
     K     = kernel(A)
     bbox = container(node)
     xc   = center(bbox)
