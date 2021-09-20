@@ -12,17 +12,23 @@ const k = 4π
 ppw     = 16
 dx      = λ/ppw
 
-pde = Elastostatic(dim=3,μ=1,λ=2)
+pde = Maxwell(dim=3,k=k)
 K   = SingleLayerKernel(pde)
 
 function IFGF.centered_factor(K::typeof(K),x,ysource::SourceTree)
     yc = center(ysource)
     r = coords(x)-yc
     d = norm(r)
-    1/d
+    g   = exp(im*k*d)/(4π*d)
+    gp  = im*k*g - g/d
+    gpp = im*k*gp - gp/d + g/d^2
+    # RRT = rvec*transpose(rvec) # rvec ⊗ rvecᵗ
+    #return g + 1/k^2*(gp/d + gpp - gp/d)
+    #return (1+im/(k*d)-1/(k*d)^2)*g    
+    return g    # works fine!
 end
 
-const T = SVector{3,Float64}
+const T = SVector{3,ComplexF64}
 
 clear_entities!()
 geo = ParametricSurfaces.Sphere(;radius=1)
@@ -46,8 +52,8 @@ tfull = @elapsed exa = [sum(K(Xpts[i],Ypts[j])*B[j] for j in 1:ny) for i in I]
 splitter = DyadicSplitter(;nmax=100)
 
 # cone list
-p_func  = (node) -> (3,5,5)
-ds_func = IFGF.cone_domain_size_func(nothing)
+p_func = (node) -> (3,5,5)
+ds_func = IFGF.cone_domain_size_func(k)
 C  = zeros(T,nx)
 A  = IFGFOperator(K,Ypts,Xpts;splitter,p_func,ds_func,_profile=true)
 @hprofile mul!(C,A,B)
