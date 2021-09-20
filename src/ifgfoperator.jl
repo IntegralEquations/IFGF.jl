@@ -8,6 +8,52 @@ kernel(op::IFGFOperator) = op.kernel
 target_tree(op::IFGFOperator) = op.target_tree
 source_tree(op::IFGFOperator) = op.source_tree
 
+"""
+    IFGFOperator(kernel,
+                 Ypoints::Vector{V},
+                 Xpoints::Vector{U};
+                 datatype,
+                 splitter,
+                 p_func,
+                 ds_func) where {V,U}
+
+Create the source and target tree-structures for clustering the source `Ypoints`
+and target `Xpoints` using the splitting strategy of `splitter`. Both trees are
+initialized (i.e. the interaction list and the cone list are computed).
+
+# Arguments
+- `kernel`: kernel of the IFGF operator.
+- `Ypoints`: vector of source points.
+- `Xpoints`: vector of observation points.
+- `datatype`: return type of the IFGF operator (e.g. `Float64` or `SVector{3,ComplexF64}`).
+- `splitter`: splitting strategy.
+- `p_func`: function `p_func(source_tree) = p` that returns the number of interpolation points 
+            per dimension in interpolation coordinates. In 3D, `p = (ns,nθ,nϕ)`. 
+            In 2D, `p = (ns,nθ)`.
+- `ds_func`: function `ds_func(source_tree) = ds` that returns the size of the cone domains
+             per dimension in interpolation coordinates. In 3D, `ds = (dss,dsθ,dsϕ)`. 
+             In 2D, `ds = (dss,dsθ)`.
+"""
+function IFGFOperator(kernel,
+                      Ypoints::Vector{V},
+                      Xpoints::Vector{U};
+                      datatype,
+                      splitter,
+                      p_func,
+                      ds_func,
+                      _profile=false) where {V,U}
+    source_tree = initialize_source_tree(;Ypoints,datatype,splitter,Xdatatype=U)
+    target_tree = initialize_target_tree(;Xpoints,splitter) 
+    compute_interaction_list!(source_tree,target_tree)
+    if !_profile
+        compute_cone_list!(source_tree,p_func,ds_func)
+    else
+        @hprofile compute_cone_list!(source_tree,p_func,ds_func)
+    end
+    ifgf = IFGFOperator(kernel, target_tree, source_tree)
+    return ifgf
+end
+
 function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
     # extract the row/target and column/source trees for convenience
     Xtree = target_tree(A)
@@ -137,7 +183,7 @@ function _compute_own_interpolant!(C,A::IFGFOperator,B,node)
     return nothing
 end
 
-function _compute_far_interaction!(C,A,B,node,interps)
+function _compute_far_interaction!(C,A::IFGFOperator,B,node,interps)
     Xpts  = A |> target_tree |> root_elements
     K     = kernel(A)
     bbox = container(node)
@@ -156,10 +202,8 @@ function _compute_far_interaction!(C,A,B,node,interps)
     return nothing
 end
 
-function _transfer_to_parent!(C,A,B,node,interps)
+function _transfer_to_parent!(C,A::IFGFOperator,B,node,interps)
     K     = kernel(A)
-    Ytree = source_tree(A)
-    T     = return_type(Ytree)
     bbox = container(node)
     xc   = center(bbox)
     node_parent = parent(node)

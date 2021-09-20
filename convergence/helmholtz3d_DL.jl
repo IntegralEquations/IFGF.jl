@@ -44,7 +44,7 @@ tfull = @elapsed exa = [sum(K(Xpts[i],Ypts[j])*B[j] for j in 1:ny) for i in I]
 @info "Estimated time for full product: $(tfull*nx/1000)"
 
 # trees
-spl = DyadicSplitter(;nmax=100)
+splitter = DyadicSplitter(;nmax=100)
 
 function ds_oscillatory(source)
     # h    = radius(source.bounding_box)
@@ -60,16 +60,10 @@ function ds_oscillatory(source)
 end
 
 # cone list
-p = (node) -> (3,5,5)
-source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=T,Xdatatype=eltype(Xpts))
-target = initialize_target_tree(;points=Xpts,splitter=spl)
-compute_interaction_list!(target,source,IFGF.admissible)
-#
+p  = (node) -> (3,5,5)
 ds = (source) -> ds_oscillatory(source)
-@hprofile compute_cone_list!(source,p,ds)
-@info source.data.p
 C  = zeros(T,nx)
-A = IFGFOperator(K,target,source)
+A  = IFGFOperator(K,Ypts,Xpts;datatype=T,splitter,p_func,ds_func,_profile=true)
 @hprofile mul!(C,A,B)
 er = norm(C[I]-exa,2) / norm(exa,2)
 @info er,nx
