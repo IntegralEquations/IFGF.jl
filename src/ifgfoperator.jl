@@ -210,8 +210,9 @@ function _compute_own_interpolant!(coneidxs2vals::Dict,A::IFGFOperator,B,node)
     return nothing
 end
 
-function _construct_chebyshev_interpolants(coneidxs2vals::Dict,node::SourceTree{N,Td}) where {N,Td}
-    interps = Dict{CartesianIndex{N},TensorLagInterp{N,Td}}()
+function _construct_chebyshev_interpolants(coneidxs2vals::Dict{CartesianIndex{N},NodesAndVals{N,Td,T}},
+                                           node::SourceTree{N,Td}) where {N,Td,T}
+    interps = Dict{CartesianIndex{N},TensorLagInterp{N,Td,T}}()
     p       = node.data.p
     for (I,rec) in active_cone_idxs_and_domains(node)
         _,vals    = coneidxs2vals[I]
