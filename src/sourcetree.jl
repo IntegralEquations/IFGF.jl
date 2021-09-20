@@ -1,11 +1,12 @@
 const NodesAndVals{N,Td,T} = Tuple{Array{SVector{N,Td},N},Array{T,N}}
 
 mutable struct SourceTreeData{N,Td,T,U}
-    # mesh of interpolation domain
-    cart_mesh::UniformCartesianMesh{N,Td}
+    # mesh of cone interpolation domains
+    # it defines HyperRectangles coordinates in interpolation coordinates `s`
+    cone_interp_msh::UniformCartesianMesh{N,Td}
     # active cone indices
     active_cone_idxs::Set{CartesianIndex{N}}
-    # mapping from an element `I` in the `cart_mesh` to the cheb nodes and values
+    # mapping from an element `I` in `active_cone_idxs` to the cheb nodes and values
     interp_data::Dict{CartesianIndex{N},NodesAndVals{N,Td,T}}
     # elements that can be interpolated
     far_list::Vector{TargetTree{N,Td,U}}
@@ -34,17 +35,56 @@ end
 
 const SourceTree{N,Td,T,V,U} = ClusterTree{V,HyperRectangle{N,Td},SourceTreeData{N,Td,T,U}}
 
+# getters
 return_type(::SourceTree{N,Td,T}) where {N,Td,T} = T
-cart_mesh(t::SourceTree)        = t.data.cart_mesh
+cone_interp_msh(t::SourceTree)  = t.data.cone_interp_msh
 active_cone_idxs(t::SourceTree) = t.data.active_cone_idxs
 interp_data(t::SourceTree)      = t.data.interp_data
+interp_data(t::SourceTree,idx)  = interp_data(t)[idx]
 far_list(t::SourceTree)         = t.data.far_list
 near_list(t::SourceTree)        = t.data.near_list
+cone_domains(t::SourceTree)     = cone_interp_msh(t) |> ElementIterator # iterator of HyperRectangles
 
+"""
+    active_cone_domains(t::SourceTree)
+
+Returns an iterator of the active cone interpolation domains
+(as HyperRectangles in interpolation coordinates `s`).
+"""
+function active_cone_domains(t::SourceTree)
+    iter = cone_domains(t) 
+    idxs = active_cone_idxs(t)
+    return (iter[i] for i in idxs)
+end
+
+"""
+    active_cone_idxs_and_domains(t::SourceTree)
+
+Returns an iterator that yields `(i,rec)`, where
+`i` is an active cone index and `rec` is its respective
+cone interpolation domain (as a HyperRectangle in interpolation
+coordinates `s`).
+"""
+function active_cone_idxs_and_domains(t::SourceTree)
+    iter = cone_domains(t) 
+    idxs = active_cone_idxs(t)
+    return ((i,iter[i]) for i in idxs)
+end
+
+# setters
 _addtofarlist!(s::SourceTree,t::TargetTree)  = push!(far_list(s),t)
 _addtonearlist!(s::SourceTree,t::TargetTree) = push!(near_list(s),t)
-_empty_interp_data!(t::SourceTree) = empty!(interp_data(t))
-_addtoconeidxs!(s::SourceTree,idxcone) = push!(active_cone_idxs(s),idxcone)
+_addtoconeidxs!(s::SourceTree,idxcone)       = push!(active_cone_idxs(s),idxcone)
+_empty_interp_data!(t::SourceTree)           = empty!(interp_data(t))
+function _set_interp_data!(s::SourceTree,idx,data)
+    interp_data(s)[idx] = data
+    return nothing
+end
+function _init_cone_interp_msh!(s::SourceTree,domain,ds)
+    s.data.cone_interp_msh = UniformCartesianMesh(domain;step=ds)
+    return nothing
+end
+
 
 """
     interp2cart(s,source::SourceTree)
@@ -192,7 +232,7 @@ function initialize_cone_interpolant!(source::SourceTree,p_func,ds_func)
     # find minimal axis-aligned bounding box for interpolation points
     domain         = compute_interpolation_domain(source)
     all(low_corner(domain) .< high_corner(domain)) || (return source)
-    data.cart_mesh = UniformCartesianMesh(domain;step=ds)
+    _init_cone_interp_msh!(source,domain,ds) # init cone interpolation domains
     # initialize all cones needed to cover far field
     for far_target in far_list(source) 
         for x in points(far_target) # target points
@@ -204,9 +244,7 @@ function initialize_cone_interpolant!(source::SourceTree,p_func,ds_func)
     # if not a root, also create all cones needed to cover interpolation points of parents
     if !isroot(source)
         source_parent = parent(source)
-        els_parent = ElementIterator(source_parent.data.cart_mesh)
-        for I in active_cone_idxs(source_parent)
-            rec  = els_parent[I]
+        for rec in active_cone_domains(source_parent) # active HyperRectangles
             cheb = cheb2nodes_iter(data.p,rec)
             for si in cheb # interpolation node in interpolation space
                 # interpolation node in physical space
@@ -260,9 +298,7 @@ function compute_interpolation_domain(source::SourceTree{N,Td}) where {N,Td}
     end
     if !isroot(source)
         source_parent = parent(source)
-        els_parent    = ElementIterator(source_parent.data.cart_mesh)
-        for idxinterp in active_cone_idxs(source_parent)
-            rec = els_parent[idxinterp]
+        for rec in active_cone_domains(source_parent)
             cheb = cheb2nodes_iter(data.p,rec)
             for si in cheb
                 # interpolation node in physical space
@@ -280,7 +316,7 @@ end
 
 function cone_index(x,tree::SourceTree)
     N = ambient_dimension(tree)
-    msh = tree.data.cart_mesh
+    msh = cone_interp_msh(tree)  # UniformCartesianMesh
     s   = cart2interp(x,tree)
     els = ElementIterator(msh)
     sz  = size(els)
@@ -310,7 +346,7 @@ interpolant of index `I`.
 """
 function interpolation_points(source::SourceTree,p,I::CartesianIndex)
     data   = source.data
-    els    = ElementIterator(data.cart_mesh)
+    els    = cone_domains(els)
     rec    = els[I]
     cheb   = cheb2nodes_iter(data.p,rec)
     return map(si -> interp2cart(si,source),cheb)

@@ -10,7 +10,7 @@ using IFGF: cone_index, interp2cart, cart2interp
         Xpts   = rand(SVector{2,Float64},nx)
         Ypts   = rand(SVector{2,Float64},ny)
         spl   = DyadicSplitter(;nmax=250)
-        source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=Float64)
+        source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=Float64,Xdatatype=eltype(Xpts))
         target = initialize_target_tree(;points=Xpts,splitter=spl)
         compute_interaction_list!(target,source,IFGF.admissible)
         # cone list
@@ -30,7 +30,7 @@ using IFGF: cone_index, interp2cart, cart2interp
         Xpts   = rand(SVector{2,Float64},nx)
         Ypts   = rand(SVector{2,Float64},ny)
         spl    = DyadicSplitter(;nmax=100)
-        source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=Float64)
+        source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=Float64,Xdatatype=eltype(Xpts))
         target = initialize_target_tree(;points=Xpts,splitter=spl)
         compute_interaction_list!(target,source,IFGF.admissible)
         # cone list
@@ -53,7 +53,7 @@ end
         Xpts   = rand(SVector{2,Float64},nx)
         Ypts   = [SVector(10,10)+rand(SVector{2,Float64}) for _ in 1:ny]
         spl   = DyadicSplitter(;nmax=250)
-        source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=Float64)
+        source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=Float64,Xdatatype=eltype(Xpts))
         target = initialize_target_tree(;points=Xpts,splitter=spl)
         compute_interaction_list!(target,source,IFGF.admissible)
         # cone list
@@ -73,7 +73,7 @@ end
         Xpts   = rand(SVector{2,Float64},nx)
         Ypts   = [SVector(10,10)+rand(SVector{2,Float64}) for _ in 1:ny]
         spl   = DyadicSplitter(;nmax=100)
-        source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=Float64)
+        source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=Float64,Xdatatype=eltype(Xpts))
         target = initialize_target_tree(;points=Xpts,splitter=spl)
         compute_interaction_list!(target,source,IFGF.admissible)
         # cone list
@@ -95,7 +95,7 @@ end
     Xpts   = rand(SVector{2,Float64},nx)
     Ypts   = [rand(SVector{2,Float64}) for _ in 1:ny]
     spl   = DyadicSplitter(;nmax=20)
-    source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=Float64)
+    source = initialize_source_tree(;points=Ypts,splitter=spl,datatype=Float64,Xdatatype=eltype(Xpts))
     target = initialize_target_tree(;points=Xpts,splitter=spl)
     compute_interaction_list!(target,source,IFGF.admissible)
     # cone list
