@@ -108,9 +108,8 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,T}, B, a, b) where {N,Td,T}
             _compute_far_interaction!(C,A,node,interps)
         end
         # transfer node's contribution to parent's interpolant
-        isroot(node) && continue
         @timeit_debug "transfer to parent" begin
-            _transfer_to_parent!(A,node,interps)
+            !isroot(node) && _transfer_to_parent!(A,node,interps)
         end
         # free interpolation data
         _empty_interp_data!(node)
