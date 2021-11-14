@@ -7,7 +7,7 @@ Create the tree-structure for clustering the target `points` using the splitting
 strategy of `splitter`. Returns a `TargetTree`.
 """
 function initialize_target_tree(;Xpoints::Vector{U},splitter) where U
-    target_tree = ClusterTree(Xpoints,splitter) 
+    target_tree = ClusterTree(Xpoints,splitter)
     @assert target_tree isa TargetTree{N,Td,U} where {N,Td}
     return target_tree
 end

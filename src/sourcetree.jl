@@ -46,7 +46,7 @@ Returns an iterator of the active cone interpolation domains
 (as HyperRectangles in interpolation coordinates `s`).
 """
 function active_cone_domains(t::SourceTree)
-    iter = cone_domains(t) 
+    iter = cone_domains(t)
     idxs = active_cone_idxs(t)
     return (iter[i] for i in idxs)
 end
@@ -60,7 +60,7 @@ cone interpolation domain (as a HyperRectangle in interpolation
 coordinates `s`).
 """
 function active_cone_idxs_and_domains(t::SourceTree)
-    iter = cone_domains(t) 
+    iter = cone_domains(t)
     idxs = active_cone_idxs(t)
     return ((i,iter[i]) for i in idxs)
 end
@@ -218,7 +218,7 @@ end
     cone_domain_size_func(::Nothing)
 
 Returns the function `ds_func(s::SourceTree)` that computes the size
-of the cone interpolation domains. If a wavenumber `k` is passed, then 
+of the cone interpolation domains. If a wavenumber `k` is passed, then
 the cone domain sizes are computed in terms of `k` and the bounding box size of `s`.
 This is used in oscillatory kernels, e.g. Helmholtz. If `nothing` is passed, the
 cone domain sizes are set constant. This is used in static kernels, e.g. Laplace.
@@ -257,9 +257,9 @@ function initialize_cone_interpolant!(source::SourceTree,p_func,ds_func)
     all(low_corner(domain) .< high_corner(domain)) || (return source)
     _init_cone_interp_msh!(source,domain,ds) # init cone interpolation domains
     # initialize all cones needed to cover far field
-    for far_target in far_list(source) 
-        for x in points(far_target) # target points
-            idxcone = cone_index(x,source)
+    for far_target in far_list(source)
+        for el in Trees.elements(far_target) # target points
+            idxcone = cone_index(center(el),source)
             idxcone ∈ active_cone_idxs(source) && continue
             _addtoconeidxs!(source,idxcone)
         end
@@ -312,8 +312,8 @@ function compute_interpolation_domain(source::SourceTree{N,Td}) where {N,Td}
     ub = svector(i->typemin(Td),N) # upper bound
     # nodes on far_list
     for far_target in far_list(source)
-        for x in points(far_target) # target points
-            s  = cart2interp(x,source)
+        for el in Trees.elements(far_target) # target points
+            s  = cart2interp(center(el),source)
             lb = min.(lb,s)
             ub = max.(ub,s)
         end

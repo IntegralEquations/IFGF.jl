@@ -1,5 +1,7 @@
 module IFGF
 
+const PROJECT_ROOT =  pkgdir(IFGF)
+
 using LinearAlgebra
 using StaticArrays
 using TimerOutputs
@@ -12,6 +14,7 @@ using WavePropBase.Utils
 using WavePropBase.Geometry
 using WavePropBase.Mesh
 using WavePropBase.Interpolation
+using WavePropBase.Trees
 
 WavePropBase.@import_interface
 
