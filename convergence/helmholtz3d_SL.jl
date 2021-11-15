@@ -12,8 +12,15 @@ const k = 8π
 ppw     = 16
 dx      = λ/ppw
 
-pde = Laplace(dim=3)
+pde = Helmholtz(dim=3,k=k)
 K   = SingleLayerKernel(pde)
+
+function IFGF.centered_factor(::typeof(K),x,ysource::SourceTree)
+    yc = center(ysource)
+    r = coords(x)-yc
+    d = norm(r)
+    exp(im*k*d)/d
+end
 
 const T = return_type(K)
 
@@ -24,25 +31,25 @@ geo = ParametricSurfaces.Sphere(;radius=1)
 np  = ceil(2/dx)
 M   = meshgen(Γ,(np,np))
 msh = NystromMesh(M,Γ;order=1)
-Xpts = qcoords(msh) |> collect
+Xpts = msh.dofs
 Ypts = Xpts
 nx = length(Xpts)
 ny = length(Ypts)
-@info nx,ny
+@info "" nx,ny
 
 I   = rand(1:nx,1000)
-B   = rand(T,ny)
+B   = randn(T,ny)
 tfull = @elapsed exa = [sum(K(Xpts[i],Ypts[j])*B[j] for j in 1:ny) for i in I]
 @info "Estimated time for full product: $(tfull*nx/1000)"
 
 # trees
 splitter = DyadicSplitter(;nmax=100)
 
-# cone list
-p_func  = (node) -> (3,5,5)
-ds_func = IFGF.cone_domain_size_func(nothing)
-C  = zeros(T,nx)
-A  = IFGFOperator(K,Ypts,Xpts;splitter,p_func,ds_func,_profile=true)
+# cone
+p_func = (node) -> (3,5,5)
+ds_func = IFGF.cone_domain_size_func(k)
+A = IFGFOperator(K,Ypts,Xpts;splitter,p_func,ds_func,_profile=true)
+C = zeros(T,nx)
 @hprofile mul!(C,A,B)
 er = norm(C[I]-exa,2) / norm(exa,2)
-@info er,nx
+@info "" er,nx

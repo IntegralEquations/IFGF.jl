@@ -1,25 +1,24 @@
 module IFGF
 
+const PROJECT_ROOT =  pkgdir(IFGF)
+
 using LinearAlgebra
 using StaticArrays
 using TimerOutputs
 using Printf
 using RecipesBase
-using FastChebInterp
-using FastChebInterp: ChebPoly
 import AbstractTrees
-using FFTW
 
 using WavePropBase
 using WavePropBase.Utils
 using WavePropBase.Geometry
 using WavePropBase.Mesh
 using WavePropBase.Interpolation
+using WavePropBase.Trees
 
 WavePropBase.@import_interface
 
 include("utils.jl")
-include("chebinterp.jl")
 include("targettree.jl")
 include("sourcetree.jl")
 include("ifgfoperator.jl")
@@ -40,6 +39,7 @@ export
     compute_interaction_list!,
     compute_cone_list!,
     clear_interpolants!,
+    cone_domain_size_func,
     # macros
     @hprofile
     # modules

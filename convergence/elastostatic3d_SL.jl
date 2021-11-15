@@ -7,15 +7,22 @@ using Random
 using Nystrom
 Random.seed!(1)
 
-const k = 8π
+const k = 4π
 λ       = 2π/k
 ppw     = 16
 dx      = λ/ppw
 
-pde = Laplace(dim=3)
+pde = Elastostatic(dim=3,μ=1,λ=2)
 K   = SingleLayerKernel(pde)
 
-const T = return_type(K)
+function IFGF.centered_factor(K::typeof(K),x,ysource::SourceTree)
+    yc = center(ysource)
+    r = coords(x)-yc
+    d = norm(r)
+    1/d
+end
+
+const T = SVector{3,Float64}
 
 clear_entities!()
 geo = ParametricSurfaces.Sphere(;radius=1)
@@ -24,7 +31,7 @@ geo = ParametricSurfaces.Sphere(;radius=1)
 np  = ceil(2/dx)
 M   = meshgen(Γ,(np,np))
 msh = NystromMesh(M,Γ;order=1)
-Xpts = qcoords(msh) |> collect
+Xpts = msh.dofs
 Ypts = Xpts
 nx = length(Xpts)
 ny = length(Ypts)

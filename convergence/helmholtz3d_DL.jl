@@ -7,13 +7,22 @@ using Random
 using Nystrom
 Random.seed!(1)
 
-const k = 8π
+const k = 4π
 λ       = 2π/k
 ppw     = 16
 dx      = λ/ppw
 
-pde = Laplace(dim=3)
-K   = SingleLayerKernel(pde)
+pde = Helmholtz(dim=3,k=k)
+G   = SingleLayerKernel(pde)
+K   = DoubleLayerKernel(pde)
+
+function IFGF.centered_factor(::typeof(K),x,ysource::SourceTree)
+    yc = center(ysource)
+    r = coords(x)-yc
+    d = norm(r)
+    exp(im*k*d)/d*(-im*k+1/d)
+    # G(x,yc)
+end
 
 const T = return_type(K)
 
@@ -24,7 +33,7 @@ geo = ParametricSurfaces.Sphere(;radius=1)
 np  = ceil(2/dx)
 M   = meshgen(Γ,(np,np))
 msh = NystromMesh(M,Γ;order=1)
-Xpts = qcoords(msh) |> collect
+Xpts = msh.dofs
 Ypts = Xpts
 nx = length(Xpts)
 ny = length(Ypts)
@@ -40,7 +49,7 @@ splitter = DyadicSplitter(;nmax=100)
 
 # cone list
 p_func  = (node) -> (3,5,5)
-ds_func = IFGF.cone_domain_size_func(nothing)
+ds_func = IFGF.cone_domain_size_func(k)
 C  = zeros(T,nx)
 A  = IFGFOperator(K,Ypts,Xpts;splitter,p_func,ds_func,_profile=true)
 @hprofile mul!(C,A,B)
