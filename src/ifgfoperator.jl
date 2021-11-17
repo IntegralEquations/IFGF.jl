@@ -1,11 +1,4 @@
 
-"""
-    NodesAndVals{N,Td,T} = Tuple{Array{SVector{N,Td},N},Array{T,N}}
-
-For storing the Chebyshev nodes and interpolation values.
-"""
-const NodesAndVals{N,Td,T} = Tuple{Array{SVector{N,Td},N},Array{T,N}}
-
 struct IFGFOperator{T} <: AbstractMatrix{T}
     kernel
     target_tree::TargetTree
@@ -25,7 +18,7 @@ function Base.size(op::IFGFOperator)
 end
 
 function Base.getindex(op::IFGFOperator,i::Int,j::Int)
-    i,j
+    error()
     # m,n = size(op)
     # ei = zeros()
     # getindex(op*ei,j)
@@ -64,12 +57,24 @@ function IFGFOperator(kernel,
     # infer the type of the matrix
     T = hasmethod(return_type,Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel,U,V)
     assert_concrete_type(T)
-    source_tree = initialize_source_tree(;Ypoints,splitter,Xdatatype=U)
+    Tv = _density_type_from_kernel_type(T)
+    source_tree = initialize_source_tree(;Ypoints,splitter,Xdatatype=U,Vdatatype=Tv)
     target_tree = initialize_target_tree(;Xpoints,splitter)
     compute_interaction_list!(source_tree,target_tree)
     compute_cone_list!(source_tree,p_func,ds_func)
     ifgf = IFGFOperator{T}(kernel, target_tree, source_tree)
     return ifgf
+end
+
+function _density_type_from_kernel_type(T)
+    if T <: Number
+        return T
+    elseif T <: SMatrix
+        m,n = size(T)
+        return SVector{n,eltype(T)}
+    else
+        error("kernel type $T not recognized")
+    end
 end
 
 function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOperator, x::AbstractVector, a::Number, b::Number;global_index=true,threads=false,droptol=0)
@@ -119,7 +124,6 @@ function _gemv_threaded!(y,K,target_tree,source_tree,x,T,droptol)
     # initialize a dictionary
     N  = ambient_dimension(target_tree)
     Td = Float64
-    node2dict = IdDict{typeof(source_tree), Dict{CartesianIndex{N},NodesAndVals{N,Td,Tv}}}()
     # the threading strategy is to partition the tree by depth, then go from
     # deepest to shallowest. Nodes of a fixed depth are mostly independent and
     # thus can spawn different tasks, (except for some "small" parts where they transfer
@@ -129,14 +133,14 @@ function _gemv_threaded!(y,K,target_tree,source_tree,x,T,droptol)
     for d in dmax:-1:1
         nodes = partition[d]
         n = length(nodes)
-        Threads.@threads for i in 1:n
+        for i in 1:n
             node = nodes[i]
             length(node) == 0 && continue
             # allocate necessary interpolation data and perform necessary
             # precomputations
             # @timeit_debug "allocate interpolant data" begin
-                _allocate_data!(node2dict, node)
-                coneidxs2vals = node2dict[node]
+                _allocate_data!(node)
+                coneidxs2vals = node.data.coneidx2vals
             #    isempty(mempool) && # push more vals to mempool
             #    node2vals[node] = pop!(mempool)
             # end
@@ -155,11 +159,10 @@ function _gemv_threaded!(y,K,target_tree,source_tree,x,T,droptol)
             # end
             # transfer node's contribution to parent's interpolant
             # @timeit_debug "transfer to parent" begin
-                !isroot(node) && _transfer_to_parent!(node2dict,K,node,interps)
+                !isroot(node) && _transfer_to_parent!(K,node,interps)
             # end
             # free interpolation data
             empty!(coneidxs2vals)
-            delete!(node2dict,node)
         end
     end
 end
@@ -226,29 +229,28 @@ function _gemv!(y,K,target_tree,source_tree,x,T,droptol)
     return y
 end
 
-function _allocate_data!(node2dict::IdDict{<:SourceTree, Dict{CartesianIndex{N},NodesAndVals{N,Td,T}}},
-                         node::SourceTree) where {N,Td,T}
+function _allocate_data!(node::SourceTree{N,Td,V,U,Tv}) where {N,Td,V,U,Tv}
     # leaves allocate their own interpolant vals
     if isleaf(node)
-        coneidxs2vals = Dict{CartesianIndex{N},NodesAndVals{N,Td,T}}()
-        push!(node2dict, node => coneidxs2vals)
+        coneidxs2vals = node.data.coneidx2vals
         for (I,rec) in active_cone_idxs_and_domains(node)
             cheb   = cheb2nodes_iter(node.data.p,rec)
             inodes = map(si->interp2cart(si,node),cheb)
-            vals   = zeros(T,node.data.p)
+            vals   = zeros(Tv,node.data.p)
             push!(coneidxs2vals, I => (inodes,vals))
         end
     end
     # allocate parent data (if needed)
-    if !isroot(node) && !haskey(node2dict, parent(node))
+    if !isroot(node)
         parent_node = parent(node)
-        coneidxs2vals_parent = Dict{CartesianIndex{N},NodesAndVals{N,Td,T}}()
-        push!(node2dict, parent_node => coneidxs2vals_parent)
-        for (I,rec) in active_cone_idxs_and_domains(parent_node)
-            cheb   = cheb2nodes_iter(node.parent.data.p,rec)
-            inodes = map(si->interp2cart(si,node.parent),cheb)
-            vals   = zeros(T,node.data.p)
-            push!(coneidxs2vals_parent, I => (inodes,vals))
+        coneidxs2vals_parent = parent_node.data.coneidx2vals
+        if isempty(coneidxs2vals_parent)
+            for (I,rec) in active_cone_idxs_and_domains(parent_node)
+                cheb   = cheb2nodes_iter(node.parent.data.p,rec)
+                inodes = map(si->interp2cart(si,node.parent),cheb)
+                vals   = zeros(Tv,node.data.p)
+                push!(coneidxs2vals_parent, I => (inodes,vals))
+            end
         end
     end
     return nothing
@@ -320,9 +322,9 @@ function _compute_far_interaction!(C,K,target_tree,node,interps)
 end
 
 
-function _transfer_to_parent!(node2dict,K,node,interps)
+function _transfer_to_parent!(K,node,interps)
     node_parent = parent(node)
-    coneidxs2vals_parent = node2dict[node_parent]
+    coneidxs2vals_parent = node_parent.data.coneidx2vals
     for idxinterp in active_cone_idxs(node_parent)
         nodes,vals = coneidxs2vals_parent[idxinterp]
         for idxval in eachindex(nodes)

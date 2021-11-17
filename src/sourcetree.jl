@@ -1,5 +1,11 @@
+"""
+    NodesAndVals{N,Td,T} = Tuple{Array{SVector{N,Td},N},Array{T,N}}
 
-mutable struct SourceTreeData{N,Td,U}
+For storing the Chebyshev nodes and interpolation values.
+"""
+const NodesAndVals{N,Td,T} = Tuple{Array{SVector{N,Td},N},Array{T,N}}
+
+mutable struct SourceTreeData{N,Td,U,Tv}
     # mesh of cone interpolation domains
     # it defines HyperRectangles coordinates in interpolation coordinates `s`
     cone_interp_msh::UniformCartesianMesh{N,Td}
@@ -11,8 +17,10 @@ mutable struct SourceTreeData{N,Td,U}
     near_list::Vector{TargetTree{N,Td,U}}
     # number of interpolation points per cone per dimension
     p::NTuple{N,Int}
+    # map from coneindex I to the interpolation nodes and values on the cone I.
+    coneidx2vals::Dict{CartesianIndex{N},NodesAndVals{N,Td,Tv}}
 end
-function SourceTreeData{N,Td,U}() where {N,Td,U}
+function SourceTreeData{N,Td,U,Tv}() where {N,Td,U,Tv}
     if N == 2
         domain = HyperRectangle{2,Td}((0,0),(0,0))
         msh    = UniformCartesianMesh(domain,(1,1))
@@ -26,10 +34,11 @@ function SourceTreeData{N,Td,U}() where {N,Td,U}
     far_list  = Vector{TargetTree{N,Td,U}}()
     near_list = Vector{TargetTree{N,Td,U}}()
     p = ntuple(i->0,N)
-    return SourceTreeData{N,Td,U}(msh,idxs,far_list,near_list,p)
+    coneidx2vals = Dict{CartesianIndex{N},NodesAndVals{N,Td,Tv}}()
+    return SourceTreeData{N,Td,U,Tv}(msh,idxs,far_list,near_list,p,coneidx2vals)
 end
 
-const SourceTree{N,Td,V,U} = ClusterTree{V,HyperRectangle{N,Td},SourceTreeData{N,Td,U}}
+const SourceTree{N,Td,V,U,Tv} = ClusterTree{V,HyperRectangle{N,Td},SourceTreeData{N,Td,U,Tv}}
 
 # getters
 cone_interp_msh(t::SourceTree)  = t.data.cone_interp_msh
@@ -141,14 +150,15 @@ strategy of `splitter`, returning a `SourceTree` with an empty `data` field
 - `datatype`: return type of the IFGF method (e.g. `Float64` or `SVector{3,ComplexF64}`).
 - `splitter`: splitting strategy.
 - `Xdatatype`: type of target points.
+- `Vdatatype`: type of value stored at interpolation nodes
 """
-function initialize_source_tree(;Ypoints::Vector{V},splitter,Xdatatype) where V
+function initialize_source_tree(;Ypoints::Vector{V},splitter,Xdatatype,Vdatatype) where V
     coords_datatype = Ypoints |> first |> coords |> typeof
     @assert coords_datatype <: SVector
     @assert isconcretetype(Xdatatype)
     N = length(coords_datatype)
     Td = eltype(coords_datatype)
-    source_tree_datatype = SourceTreeData{N,Td,Xdatatype}
+    source_tree_datatype = SourceTreeData{N,Td,Xdatatype,Vdatatype}
     source_tree = ClusterTree{source_tree_datatype}(Ypoints,splitter)
     @assert source_tree isa SourceTree{N,Td}
     return source_tree
