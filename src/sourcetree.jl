@@ -223,23 +223,21 @@ the cone domain sizes are computed in terms of `k` and the bounding box size of 
 This is used in oscillatory kernels, e.g. Helmholtz. If `nothing` is passed, the
 cone domain sizes are set constant. This is used in static kernels, e.g. Laplace.
 """
-function cone_domain_size_func(::Nothing)
+function cone_domain_size_func(::Nothing,ds = Float64.((1,π/2,π/2)))
     # static case (e.g. Laplace)
     function ds_func(::SourceTree{N}) where N
         N != 3 && notimplemented()
-        ds = Float64.((1,π/2,π/2))
         return ds
     end
     return ds_func
 end
-function cone_domain_size_func(k)
+function cone_domain_size_func(k,ds = Float64.((1,π/2,π/2)))
     # oscillatory case (e.g. Helmholtz, Maxwell)
     # k: wavenumber
     function ds_func(source::SourceTree{N}) where N
         N != 3 && notimplemented()
         bbox = IFGF.container(source)
-        w    = maximum(IFGF.high_corner(bbox)-IFGF.low_corner(bbox))
-        ds   = Float64.((1,π/2,π/2))
+        w    = maximum(high_corner(bbox)-low_corner(bbox))
         δ    = k*w/2
         return ds ./ max(δ,1)
     end

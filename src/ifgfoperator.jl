@@ -6,32 +6,29 @@ For storing the Chebyshev nodes and interpolation values.
 """
 const NodesAndVals{N,Td,T} = Tuple{Array{SVector{N,Td},N},Array{T,N}}
 
-struct IFGFOperator{N,Td,K,U,V}
-    kernel::K
-    target_tree::TargetTree{N,Td,U}
-    source_tree::SourceTree{N,Td,V,U}
+struct IFGFOperator{T} <: AbstractMatrix{T}
+    kernel
+    target_tree::TargetTree
+    source_tree::SourceTree
 end
+
+rowrange(ifgf::IFGFOperator)         = Trees.index_range(ifgf.target_tree)
+colrange(ifgf::IFGFOperator)         = Trees.index_range(ifgf.source_tree)
 
 kernel(op::IFGFOperator) = op.kernel
 target_tree(op::IFGFOperator) = op.target_tree
 source_tree(op::IFGFOperator) = op.source_tree
-Base.size(op::IFGFOperator,i) = size(op)[i]
 function Base.size(op::IFGFOperator)
     sizeX = op |> target_tree |> root_elements |> length
     sizeY = op |> source_tree |> root_elements |> length
     return (sizeX,sizeY)
 end
-function Base.:*(A::IFGFOperator{N,Td}, B::AbstractArray{T,NB}) where {N,Td,T,NB}
-    # FIX: Ctype is not equal to T
-    Ctype = T
-    if NB == 1
-        C = Vector{Ctype}(undef, size(A,1))
-    elseif NB == 2
-        C = Matrix{Ctype}(undef, size(A,1), size(B,2))
-    else
-        notimplemented()
-    end
-    return mul!(C, A, B, true, false)
+
+function Base.getindex(op::IFGFOperator,i::Int,j::Int)
+    i,j
+    # m,n = size(op)
+    # ei = zeros()
+    # getindex(op*ei,j)
 end
 
 """
@@ -59,45 +56,131 @@ initialized (i.e. the interaction list and the cone list are computed).
              In 2D, `ds = (dss,dsθ)`.
 """
 function IFGFOperator(kernel,
-                      Ypoints::Vector{V},
-                      Xpoints::Vector{U};
+                      Ypoints::Vector{U},
+                      Xpoints::Vector{V};
                       splitter,
                       p_func,
-                      ds_func,
-                      _profile=false) where {V,U}
+                      ds_func) where {U,V}
+    # infer the type of the matrix
+    T = hasmethod(return_type,Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel,U,V)
+    assert_concrete_type(T)
     source_tree = initialize_source_tree(;Ypoints,splitter,Xdatatype=U)
     target_tree = initialize_target_tree(;Xpoints,splitter)
     compute_interaction_list!(source_tree,target_tree)
-    if !_profile
-        compute_cone_list!(source_tree,p_func,ds_func)
-    else
-        @hprofile compute_cone_list!(source_tree,p_func,ds_func)
-    end
-    ifgf = IFGFOperator(kernel, target_tree, source_tree)
+    compute_cone_list!(source_tree,p_func,ds_func)
+    ifgf = IFGFOperator{T}(kernel, target_tree, source_tree)
     return ifgf
 end
 
-function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,K,U,V}, B::AbstractVector{T}, a, b) where {N,Td,K,U,V,T}
-    # check compatible sizes
-    @assert size(A) == (length(C),length(B))
-    # extract the row/target and column/source trees for convenience
-    Xtree = target_tree(A)
-    Ytree = source_tree(A)
-    # since the IFGFOperator represents A = Pr*H*Pc, where Pr and Pc are row and
-    # column permutations, we need first to rewrite C <-- b*C + a*(Pc*H*Pb)*B as
+function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOperator, x::AbstractVector, a::Number, b::Number;global_index=true,threads=false,droptol=0)
+    # since the IFGF represents A = Pr*K*Pc, where Pr and Pc are row and column
+    # permutations, we need first to rewrite C <-- b*C + a*(Pc*H*Pb)*B as
     # C <-- Pr*(b*inv(Pr)*C + a*H*(Pc*B)). Following this rewrite, the
     # multiplication is performed by first defining B <-- Pc*B, and C <--
     # inv(Pr)*C, doing the multiplication with the permuted entries, and then
     # permuting the result  C <-- Pr*C at the end.
+    T     = eltype(A)
+    rtree = target_tree(A)
+    ctree = source_tree(A)
     # permute input
-    B = B[loc2glob(Ytree)]  # this makes a copy of B
-    C = permute!(C,loc2glob(Xtree))
-    # multiply at the beginning by `a` and `b` and be done with it
-    rmul!(C,b)
-    rmul!(B,a)
+    if global_index
+        x         = x[ctree.loc2glob]
+        y         = permute!(y,rtree.loc2glob)
+        rmul!(x,a) # multiply in place since this is a new copy, so does not mutate exterior x
+    else
+        x = a*x # new copy of x
+    end
+    iszero(b) ? fill!(y,zero(eltype(y))) : rmul!(y,b)
+
+    # extract the kernel and place a function barrier for heavy computation
+    K     = kernel(A)
+    if threads
+        _gemv_threaded!(y,K,rtree,ctree,x,T,droptol)
+    else
+        _gemv!(y,K,rtree,ctree,x,T,droptol)
+    end
+    # permute output
+    global_index && invpermute!(y,loc2glob(rtree))
+
+    return y
+end
+
+function _gemv_threaded!(y,K,target_tree,source_tree,x,T,droptol)
+    Tv = if T <: Number
+        T
+    elseif  T<:SMatrix
+        m,n = size(T)
+        SVector{n,eltype(T)}
+    end
+    # do some planning for the fft
+    @timeit_debug "planning fft" begin
+        plan = FFTW.plan_r2r!(zeros(Tv,source_tree.data.p),FFTW.REDFT00;flags=FFTW.PATIENT)
+    end
+    # initialize a dictionary
+    N  = ambient_dimension(target_tree)
+    Td = Float64
+    node2dict = IdDict{typeof(source_tree), Dict{CartesianIndex{N},NodesAndVals{N,Td,Tv}}}()
+    # the threading strategy is to partition the tree by depth, then go from
+    # deepest to shallowest. Nodes of a fixed depth are mostly independent and
+    # thus can spawn different tasks, (except for some "small" parts where they transfer
+    # data to their parent or push into a dict). For that part, we use a lock.
+    partition = Trees.partition_by_depth(source_tree)
+    dmax = length(partition)
+    for d in dmax:-1:1
+        nodes = partition[d]
+        n = length(nodes)
+        Threads.@threads for i in 1:n
+            node = nodes[i]
+            length(node) == 0 && continue
+            # allocate necessary interpolation data and perform necessary
+            # precomputations
+            # @timeit_debug "allocate interpolant data" begin
+                _allocate_data!(node2dict, node)
+                coneidxs2vals = node2dict[node]
+            #    isempty(mempool) && # push more vals to mempool
+            #    node2vals[node] = pop!(mempool)
+            # end
+            # @timeit_debug "near interactions" begin
+                _compute_near_interaction!(y,K,target_tree,source_tree,x,node)
+            # end
+            # @timeit_debug "leaf interpolants" begin
+                isleaf(node) && _compute_own_interpolant!(coneidxs2vals,K,source_tree,x,node)
+            # end
+            #
+            # @timeit_debug "construct chebyshev interpolants" begin
+                interps = _construct_chebyshev_interpolants(coneidxs2vals,node,plan,droptol)
+            # end
+            # @timeit_debug "far interactions" begin
+                _compute_far_interaction!(y,K,target_tree,node,interps)
+            # end
+            # transfer node's contribution to parent's interpolant
+            # @timeit_debug "transfer to parent" begin
+                !isroot(node) && _transfer_to_parent!(node2dict,K,node,interps)
+            # end
+            # free interpolation data
+            empty!(coneidxs2vals)
+            delete!(node2dict,node)
+        end
+    end
+end
+
+function _gemv!(y,K,target_tree,source_tree,x,T,droptol)
+    Tv = if T <: Number
+        T
+    elseif  T<:SMatrix
+        m,n = size(T)
+        SVector{n,eltype(T)}
+    end
+    # do some planning for the fft
+    @timeit_debug "planning fft" begin
+        plan = FFTW.plan_r2r!(zeros(Tv,source_tree.data.p),FFTW.REDFT00;flags=FFTW.PATIENT)
+    end
+    # initialize a dictionary
+    N  = ambient_dimension(target_tree)
+    Td = Float64
+    node2dict = IdDict{typeof(source_tree), Dict{CartesianIndex{N},NodesAndVals{N,Td,Tv}}}()
     # iterate over all nodes in source tree, visiting children before parents
-    node2dict = IdDict{SourceTree{N,Td,V,U}, Dict{CartesianIndex{N},NodesAndVals{N,Td,T}}}()
-    for node in AbstractTrees.PostOrderDFS(Ytree)
+    for node in AbstractTrees.PostOrderDFS(source_tree)
         length(node) == 0 && continue
         # allocate necessary interpolation data and perform necessary
         # precomputations
@@ -108,16 +191,16 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,K,U,V}, B::AbstractVector{T}
         #    node2vals[node] = pop!(mempool)
         end
         @timeit_debug "near interactions" begin
-            _compute_near_interaction!(C,A,B,node)
+            _compute_near_interaction!(y,K,target_tree,source_tree,x,node)
         end
         # leaf blocks need to update their own interpolant values since they
         # have no children
         @timeit_debug "leaf interpolants" begin
-            isleaf(node) && _compute_own_interpolant!(coneidxs2vals,A,B,node)
+            isleaf(node) && _compute_own_interpolant!(coneidxs2vals,K,source_tree,x,node)
         end
         #
         @timeit_debug "construct chebyshev interpolants" begin
-            interps = _construct_chebyshev_interpolants(coneidxs2vals,node)
+            interps = _construct_chebyshev_interpolants(coneidxs2vals,node,plan,droptol)
         end
         # build interp to far field map
         # @timeit_debug "cone2far map" begin
@@ -128,11 +211,11 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,K,U,V}, B::AbstractVector{T}
         # end
         # handle far targets by interpolation
         @timeit_debug "far interactions" begin
-            _compute_far_interaction!(C,A,node,interps)
+            _compute_far_interaction!(y,K,target_tree,node,interps)
         end
         # transfer node's contribution to parent's interpolant
         @timeit_debug "transfer to parent" begin
-            !isroot(node) && _transfer_to_parent!(node2dict,A,node,interps)
+            !isroot(node) && _transfer_to_parent!(node2dict,K,node,interps)
         end
         # free interpolation data
         empty!(coneidxs2vals)
@@ -140,20 +223,7 @@ function LinearAlgebra.mul!(C, A::IFGFOperator{N,Td,K,U,V}, B::AbstractVector{T}
         #vals = pop!(node2vals, node)
         #push!(mempool, vals)
     end
-    # permute output
-    invpermute!(C,loc2glob(Xtree))
-    return C
-end
-function LinearAlgebra.mul!(C, A::IFGFOperator, B::AbstractMatrix, a, b)
-    # TODO: multithreading
-    # check compatible sizes
-    @assert size(C) == (size(A,1),size(B,2))
-    @assert size(A,2) == size(B,1)
-    # compute product for each column
-    for (Bcol,Ccol) in zip(eachcol(B),eachcol(C))
-        mul!(Ccol, A, Bcol, a, b)
-    end
-    return C
+    return y
 end
 
 function _allocate_data!(node2dict::IdDict{<:SourceTree, Dict{CartesianIndex{N},NodesAndVals{N,Td,T}}},
@@ -184,10 +254,9 @@ function _allocate_data!(node2dict::IdDict{<:SourceTree, Dict{CartesianIndex{N},
     return nothing
 end
 
-function _compute_near_interaction!(C,A::IFGFOperator,B,node)
-    Xpts = A |> target_tree |> root_elements
-    Ypts = A |> source_tree |> root_elements
-    K    = kernel(A)
+function _compute_near_interaction!(C,K,target_tree,source_tree,B,node)
+    Xpts = target_tree |> root_elements
+    Ypts = source_tree |> root_elements
     for near_target in near_list(node)
         # near targets use direct evaluation
         for i in index_range(near_target)
@@ -199,9 +268,8 @@ function _compute_near_interaction!(C,A::IFGFOperator,B,node)
     return nothing
 end
 
-function _compute_own_interpolant!(coneidxs2vals::Dict,A::IFGFOperator,B,node)
-    Ypts  = A |> source_tree |> root_elements
-    K     = kernel(A)
+function _compute_own_interpolant!(coneidxs2vals::Dict,K,source_tree,B,node)
+    Ypts  = source_tree |> root_elements
     for I in active_cone_idxs(node)
         nodes,vals = coneidxs2vals[I]
         for i in eachindex(nodes)
@@ -218,24 +286,25 @@ function _compute_own_interpolant!(coneidxs2vals::Dict,A::IFGFOperator,B,node)
 end
 
 function _construct_chebyshev_interpolants(coneidxs2vals::Dict{CartesianIndex{N},NodesAndVals{N,Td,T}},
-                                           node::SourceTree{N,Td}) where {N,Td,T}
-    interps = Dict{CartesianIndex{N},TensorLagInterp{N,Td,T}}()
+                                           node::SourceTree{N,Td},plan,tol) where {N,Td,T}
+    # interps = Dict{CartesianIndex{N},TensorLagInterp{N,Td,T}}()
+    interps = Dict{CartesianIndex{N},ChebPoly{N,T,Td}}()
     p       = node.data.p
     for (I,rec) in active_cone_idxs_and_domains(node)
         _,vals    = coneidxs2vals[I]
         lc        = low_corner(rec)
-        uc        = high_corner(rec)
-        nodes1d   = ntuple(d->cheb2nodes(p[d],lc[d],uc[d]),N)
-        weights1d = ntuple(d->cheb2weights(p[d]),N)
-        poly      = TensorLagInterp(vals,nodes1d,weights1d)
+        hc        = high_corner(rec)
+        # nodes1d   = ntuple(d->cheb2nodes(p[d],lc[d],hc[d]),N)
+        # weights1d = ntuple(d->cheb2weights(p[d]),N)
+        # poly      = TensorLagInterp(vals,nodes1d,weights1d)
+        poly      = chebinterp!(vals,lc,hc,plan;tol)
         push!(interps,I=>poly)
     end
     return interps
 end
 
-function _compute_far_interaction!(C,A::IFGFOperator,node,interps)
-    Xpts  = A |> target_tree |> root_elements
-    K     = kernel(A)
+function _compute_far_interaction!(C,K,target_tree,node,interps)
+    Xpts  = target_tree |> root_elements
     # els = cone_domains(node)
     for far_target in far_list(node)
         for i in index_range(far_target)
@@ -250,8 +319,8 @@ function _compute_far_interaction!(C,A::IFGFOperator,node,interps)
     return nothing
 end
 
-function _transfer_to_parent!(node2dict,A::IFGFOperator,node,interps)
-    K = kernel(A)
+
+function _transfer_to_parent!(node2dict,K,node,interps)
     node_parent = parent(node)
     coneidxs2vals_parent = node2dict[node_parent]
     for idxinterp in active_cone_idxs(node_parent)
@@ -279,3 +348,15 @@ function transfer_factor(K,x,ysource::SourceTree)
     yparent = parent(ysource)
     return centered_factor(K,x,ysource)/centered_factor(K,x,yparent)
 end
+
+function Base.show(io::IO,ifgf::IFGFOperator)
+    println(io,"IFGFOperator of $(eltype(ifgf)) with range $(rowrange(ifgf)) × $(colrange(ifgf))")
+    ctree = source_tree(ifgf)
+    nodes  = collect(PreOrderDFS(ctree))
+    leaves = collect(Leaves(ctree))
+    println("\t number of nodes:                $(length(nodes))")
+    println("\t number of leaves:               $(length(leaves))")
+    println("\t number of active cones:         $(sum(x->length(x.data.active_cone_idxs),nodes))")
+    println("\t maximum number of active cones: $(maximum(x->length(x.data.active_cone_idxs),nodes))")
+end
+Base.show(io::IO,::MIME"text/plain",ifgf::IFGFOperator) = show(io,ifgf)
