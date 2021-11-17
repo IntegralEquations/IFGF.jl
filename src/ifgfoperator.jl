@@ -3,6 +3,7 @@ struct IFGFOperator{T} <: AbstractMatrix{T}
     kernel
     target_tree::TargetTree
     source_tree::SourceTree
+    p::NTuple
 end
 
 rowrange(ifgf::IFGFOperator)         = Trees.index_range(ifgf.target_tree)
@@ -29,7 +30,7 @@ end
                  Ypoints::Vector{V},
                  Xpoints::Vector{U};
                  splitter,
-                 p_func,
+                 p,
                  ds_func) where {V,U}
 
 Create the source and target tree-structures for clustering the source `Ypoints`
@@ -41,7 +42,7 @@ initialized (i.e. the interaction list and the cone list are computed).
 - `Ypoints`: vector of source points.
 - `Xpoints`: vector of observation points.
 - `splitter`: splitting strategy.
-- `p_func`: function `p_func(source_tree) = p` that returns the number of interpolation points
+- `p`: the number of interpolation points
             per dimension in interpolation coordinates. In 3D, `p = (ns,nθ,nϕ)`.
             In 2D, `p = (ns,nθ)`.
 - `ds_func`: function `ds_func(source_tree) = ds` that returns the size of the cone domains
@@ -52,7 +53,7 @@ function IFGFOperator(kernel,
                       Ypoints::Vector{U},
                       Xpoints::Vector{V};
                       splitter,
-                      p_func,
+                      p,
                       ds_func) where {U,V}
     # infer the type of the matrix
     T = hasmethod(return_type,Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel,U,V)
@@ -61,8 +62,8 @@ function IFGFOperator(kernel,
     source_tree = initialize_source_tree(;Ypoints,splitter,Xdatatype=U,Vdatatype=Tv)
     target_tree = initialize_target_tree(;Xpoints,splitter)
     compute_interaction_list!(source_tree,target_tree)
-    compute_cone_list!(source_tree,p_func,ds_func)
-    ifgf = IFGFOperator{T}(kernel, target_tree, source_tree)
+    compute_cone_list!(source_tree,p,ds_func)
+    ifgf = IFGFOperator{T}(kernel, target_tree, source_tree, p)
     return ifgf
 end
 
@@ -100,7 +101,7 @@ function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOperator, x::AbstractVecto
     # extract the kernel and place a function barrier for heavy computation
     K     = kernel(A)
     if threads
-        _gemv_threaded!(y,K,rtree,ctree,x,T,droptol)
+        _gemv_threaded!(y,K,rtree,ctree,x,T,Val(A.p))
     else
         _gemv!(y,K,rtree,ctree,x,T,droptol)
     end
@@ -110,11 +111,11 @@ function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOperator, x::AbstractVecto
     return y
 end
 
-function _gemv_threaded!(y,K,target_tree,source_tree,x,T,droptol)
+function _gemv_threaded!(y,K,target_tree,source_tree,x,T,p::Val{P}) where {P}
     mutex = ReentrantLock()
     Tv = _density_type_from_kernel_type(T)
     # do some planning for the fft
-    plan = FFTW.plan_r2r!(zeros(Tv,source_tree.data.p),FFTW.REDFT00;flags=FFTW.PATIENT)
+    plan = FFTW.plan_r2r!(zeros(Tv,P),FFTW.REDFT00;flags=FFTW.PATIENT)
     # initialize a dictionary
     N  = ambient_dimension(target_tree)
     Td = Float64
@@ -124,33 +125,37 @@ function _gemv_threaded!(y,K,target_tree,source_tree,x,T,droptol)
     # data to their parent or push into a dict). For that part, we use a lock.
     partition = Trees.partition_by_depth(source_tree)
     dmax = length(partition)
+    times = zeros(dmax)
     for d in dmax:-1:1
-        nodes = partition[d]
-        Threads.@threads for node in nodes
-            # node = nodes[i]
-            length(node) == 0 && continue
-            # allocate necessary interpolation data and perform necessary
-            # precomputations
-            isleaf(node) && _allocate_own_data!(node)
-            if d != 1 # !isroot(node)
-                lock(mutex) do
-                    _allocate_parent_data!(node)
+        times[d] = @elapsed begin
+            nodes = partition[d]
+            Threads.@threads for node in nodes
+                # node = nodes[i]
+                length(node) == 0 && continue
+                # allocate necessary interpolation data and perform necessary
+                # precomputations
+                isleaf(node) && _allocate_own_data!(node,p)
+                if d != 1 # !isroot(node)
+                    lock(mutex) do
+                        _allocate_parent_data!(node,p)
+                    end
                 end
-            end
-            coneidxs2vals = node.data.coneidx2vals
-            _compute_near_interaction!(y,K,target_tree,source_tree,x,node)
-            isleaf(node) && _compute_own_interpolant!(coneidxs2vals,K,source_tree,x,node)
-            interps = _construct_chebyshev_interpolants(coneidxs2vals,node,plan,droptol)
-            _compute_far_interaction!(y,K,target_tree,node,interps)
-            # transfer node's contribution to parent's interpolant
-            if d != 1 #!isroot(node)
-                lock(mutex) do
-                    _transfer_to_parent!(K,node,interps)
+                coneidxs2vals = node.data.coneidx2vals
+                _compute_near_interaction!(y,K,target_tree,source_tree,x,node)
+                isleaf(node) && _compute_own_interpolant!(coneidxs2vals,K,source_tree,x,node)
+                interps = _construct_chebyshev_interpolants(coneidxs2vals,node,plan)
+                _compute_far_interaction!(y,K,target_tree,node,interps,p)
+                # transfer node's contribution to parent's interpolant
+                if d != 1 #!isroot(node)
+                    lock(mutex) do
+                        _transfer_to_parent!(K,node,interps,p)
+                    end
                 end
+                empty!(coneidxs2vals)
             end
-            empty!(coneidxs2vals)
         end
     end
+    @debug "time per depth: $times"
 end
 
 # TODO: factor the _gemv! and gemv_threaded! codes?
@@ -184,8 +189,8 @@ function _gemv!(y,K,target_tree,source_tree,x,T,droptol)
             coneidxs2vals = node.data.coneidx2vals
             _compute_near_interaction!(y,K,target_tree,source_tree,x,node)
             isleaf(node) && _compute_own_interpolant!(coneidxs2vals,K,source_tree,x,node)
-            interps = _construct_chebyshev_interpolants(coneidxs2vals,node,plan,droptol)
-            _compute_far_interaction!(y,K,target_tree,node,interps)
+            interps = _construct_chebyshev_interpolants(coneidxs2vals,node,plan)
+            _compute_far_interaction!(y,K,target_tree,node,interps,P)
             # transfer node's contribution to parent's interpolant
             if !isroot(node)
                 lock(mutex) do
@@ -197,27 +202,27 @@ function _gemv!(y,K,target_tree,source_tree,x,T,droptol)
     end
 end
 
-function _allocate_own_data!(node::SourceTree{N,Td,V,U,Tv}) where {N,Td,V,U,Tv}
+function _allocate_own_data!(node::SourceTree{N,Td,V,U,Tv},::Val{P}) where {N,Td,V,U,Tv,P}
     # leaves allocate their own interpolant vals
     coneidxs2vals = node.data.coneidx2vals
     for (I,rec) in active_cone_idxs_and_domains(node)
-        cheb   = cheb2nodes_iter(node.data.p,rec)
+        cheb   = cheb2nodes_iter(P,rec)
         inodes = map(si->interp2cart(si,node),cheb)
-        vals   = zeros(Tv,node.data.p)
+        vals   = zeros(Tv,P)
         push!(coneidxs2vals, I => (inodes,vals))
     end
     return nothing
 end
 
-function _allocate_parent_data!(node::SourceTree{N,Td,V,U,Tv}) where {N,Td,V,U,Tv}
+function _allocate_parent_data!(node::SourceTree{N,Td,V,U,Tv},::Val{P}) where {N,Td,V,U,Tv,P}
     # allocate parent data (if needed)
     parent_node = parent(node)
     coneidxs2vals_parent = parent_node.data.coneidx2vals
     if isempty(coneidxs2vals_parent)
         for (I,rec) in active_cone_idxs_and_domains(parent_node)
-            cheb   = cheb2nodes_iter(node.parent.data.p,rec)
+            cheb   = cheb2nodes_iter(P,rec)
             inodes = map(si->interp2cart(si,node.parent),cheb)
-            vals   = zeros(Tv,node.data.p)
+            vals   = zeros(Tv,P)
             push!(coneidxs2vals_parent, I => (inodes,vals))
         end
     end
@@ -269,10 +274,9 @@ function _compute_own_interpolant!(coneidxs2vals::Dict,K,source_tree,B,node)
 end
 
 function _construct_chebyshev_interpolants(coneidxs2vals::Dict{CartesianIndex{N},NodesAndVals{N,Td,T}},
-                                           node::SourceTree{N,Td},plan,tol) where {N,Td,T}
+                                           node::SourceTree{N,Td},plan) where {N,Td,T}
     # interps = Dict{CartesianIndex{N},TensorLagInterp{N,Td,T}}()
     interps = Dict{CartesianIndex{N},ChebPoly{N,T,Td}}()
-    p       = node.data.p
     for (I,rec) in active_cone_idxs_and_domains(node)
         _,vals    = coneidxs2vals[I]
         lc        = low_corner(rec)
@@ -280,13 +284,13 @@ function _construct_chebyshev_interpolants(coneidxs2vals::Dict{CartesianIndex{N}
         # nodes1d   = ntuple(d->cheb2nodes(p[d],lc[d],hc[d]),N)
         # weights1d = ntuple(d->cheb2weights(p[d]),N)
         # poly      = TensorLagInterp(vals,nodes1d,weights1d)
-        poly      = chebinterp!(vals,lc,hc,plan;tol)
+        poly      = chebinterp!(vals,lc,hc,plan)
         push!(interps,I=>poly)
     end
     return interps
 end
 
-function _compute_far_interaction!(C,K,target_tree,node,interps)
+function _compute_far_interaction!(C,K,target_tree,node,interps,p)
     Xpts  = target_tree |> root_elements
     Threads.@threads for far_target in far_list(node)
         for i in index_range(far_target)
@@ -295,14 +299,13 @@ function _compute_far_interaction!(C,K,target_tree,node,interps)
             s       = cart2interp(coords(x),node)
             poly    = interps[idxcone]
             # @assert s ∈ els[idxcone]
-            C[i] += poly(s) * centered_factor(K,x,node)
+            C[i] += poly(s,p) * centered_factor(K,x,node)
         end
     end
     return nothing
 end
 
-
-function _transfer_to_parent!(K,node,interps)
+function _transfer_to_parent!(K,node,interps,p)
     node_parent = parent(node)
     coneidxs2vals_parent = node_parent.data.coneidx2vals
     for idxinterp in active_cone_idxs(node_parent)
@@ -313,7 +316,7 @@ function _transfer_to_parent!(K,node,interps)
             si        = cart2interp(xi,node)
             poly      = interps[idxcone]
             # transfer block's interpolant to parent's interpolants
-            vals[idxval] += poly(si) * transfer_factor(K,xi,node)
+            vals[idxval] += poly(si,p) * transfer_factor(K,xi,node)
         end
     end
     return nothing

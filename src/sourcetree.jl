@@ -15,8 +15,6 @@ mutable struct SourceTreeData{N,Td,U,Tv}
     far_list::Vector{TargetTree{N,Td,U}}
     # elements that cannot be interpolated
     near_list::Vector{TargetTree{N,Td,U}}
-    # number of interpolation points per cone per dimension
-    p::NTuple{N,Int}
     # map from coneindex I to the interpolation nodes and values on the cone I.
     coneidx2vals::Dict{CartesianIndex{N},NodesAndVals{N,Td,Tv}}
 end
@@ -33,9 +31,8 @@ function SourceTreeData{N,Td,U,Tv}() where {N,Td,U,Tv}
     idxs      = Set{CartesianIndex{N}}()
     far_list  = Vector{TargetTree{N,Td,U}}()
     near_list = Vector{TargetTree{N,Td,U}}()
-    p = ntuple(i->0,N)
     coneidx2vals = Dict{CartesianIndex{N},NodesAndVals{N,Td,Tv}}()
-    return SourceTreeData{N,Td,U,Tv}(msh,idxs,far_list,near_list,p,coneidx2vals)
+    return SourceTreeData{N,Td,U,Tv}(msh,idxs,far_list,near_list,coneidx2vals)
 end
 
 const SourceTree{N,Td,V,U,Tv} = ClusterTree{V,HyperRectangle{N,Td},SourceTreeData{N,Td,U,Tv}}
@@ -254,14 +251,11 @@ function cone_domain_size_func(k,ds = Float64.((1,π/2,π/2)))
     return ds_func
 end
 
-function initialize_cone_interpolant!(source::SourceTree,p_func,ds_func)
+function initialize_cone_interpolant!(source::SourceTree,p,ds_func)
     length(source) == 0 && (return source)
     ds      = ds_func(source)
-    p       = p_func(source)
-    data    = source.data
-    data.p  = p
     # find minimal axis-aligned bounding box for interpolation points
-    domain         = compute_interpolation_domain(source)
+    domain         = compute_interpolation_domain(source,p)
     all(low_corner(domain) .< high_corner(domain)) || (return source)
     _init_cone_interp_msh!(source,domain,ds) # init cone interpolation domains
     # initialize all cones needed to cover far field
@@ -276,7 +270,7 @@ function initialize_cone_interpolant!(source::SourceTree,p_func,ds_func)
     if !isroot(source)
         source_parent = parent(source)
         for rec in active_cone_domains(source_parent) # active HyperRectangles
-            cheb = cheb2nodes_iter(source_parent.data.p,rec)
+            cheb = cheb2nodes_iter(p,rec)
             for si in cheb # interpolation node in interpolation space
                 # interpolation node in physical space
                 xi = interp2cart(si,source_parent)
@@ -315,7 +309,7 @@ end
 Compute a domain (as a `HyperRectangle`) in interpolation space for which
 `source` must provide a covering through its cone interpolants.
 """
-function compute_interpolation_domain(source::SourceTree{N,Td}) where {N,Td}
+function compute_interpolation_domain(source::SourceTree{N,Td},p) where {N,Td}
     lb = svector(i->typemax(Td),N) # lower bound
     ub = svector(i->typemin(Td),N) # upper bound
     # nodes on far_list
@@ -329,7 +323,7 @@ function compute_interpolation_domain(source::SourceTree{N,Td}) where {N,Td}
     if !isroot(source)
         source_parent = parent(source)
         for rec in active_cone_domains(source_parent)
-            cheb = cheb2nodes_iter(source_parent.data.p,rec)
+            cheb = cheb2nodes_iter(p,rec)
             for si in cheb
                 # interpolation node in physical space
                 xi = interp2cart(si,source_parent)
@@ -374,11 +368,11 @@ end
 Return the interpolation points, in cartesian coordinates, for the cone
 interpolant of index `I`.
 """
-function interpolation_points(source::SourceTree,I::CartesianIndex)
+function interpolation_points(source::SourceTree,I::CartesianIndex,p)
     data   = source.data
     els    = cone_domains(els)
     rec    = els[I]
-    cheb   = cheb2nodes_iter(data.p,rec)
+    cheb   = cheb2nodes_iter(p,rec)
     return map(si -> interp2cart(si,source),cheb)
 end
 
