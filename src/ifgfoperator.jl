@@ -228,13 +228,27 @@ function _compute_near_interaction!(C,K,target_tree,source_tree,B,node)
     Ypts = source_tree |> root_elements
     Threads.@threads for near_target in near_list(node)
         # near targets use direct evaluation
-        for i in index_range(near_target)
-            for j in index_range(node)
-                C[i] += K(Xpts[i], Ypts[j]) * B[j]
-            end
-        end
+        I = index_range(near_target)
+        J = index_range(node)
+        near_interaction!(view(C,I),K,view(Xpts,I),view(Ypts,J),view(B,J))
     end
     return nothing
+end
+
+"""
+    near_interaction!(C,K,X,Y,σ)
+
+Compute `C[i] <-- C[i] + ∑ⱼ K(X[i],Y[j])*σ[j]`.
+"""
+function near_interaction!(C,K,X,Y,σ)
+    m,n = length(X), length(Y)
+    @assert length(C) == m
+    @assert length(σ) == n
+    for i in 1:m
+        for j in 1:n
+            C[i] += K(X[i], Y[j]) * σ[j]
+        end
+    end
 end
 
 function _compute_own_interpolant!(coneidxs2vals::Dict,K,source_tree,B,node)
