@@ -111,16 +111,53 @@ function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOperator, x::AbstractVecto
 end
 
 function _gemv_threaded!(y,K,target_tree,source_tree,x,T,droptol)
-    Tv = if T <: Number
-        T
-    elseif  T<:SMatrix
-        m,n = size(T)
-        SVector{n,eltype(T)}
-    end
+    mutex = ReentrantLock()
+    Tv = _density_type_from_kernel_type(T)
     # do some planning for the fft
-    @timeit_debug "planning fft" begin
-        plan = FFTW.plan_r2r!(zeros(Tv,source_tree.data.p),FFTW.REDFT00;flags=FFTW.PATIENT)
+    plan = FFTW.plan_r2r!(zeros(Tv,source_tree.data.p),FFTW.REDFT00;flags=FFTW.PATIENT)
+    # initialize a dictionary
+    N  = ambient_dimension(target_tree)
+    Td = Float64
+    # the threading strategy is to partition the tree by depth, then go from
+    # deepest to shallowest. Nodes of a fixed depth are mostly independent and
+    # thus can spawn different tasks, (except for some "small" parts where they transfer
+    # data to their parent or push into a dict). For that part, we use a lock.
+    partition = Trees.partition_by_depth(source_tree)
+    dmax = length(partition)
+    for d in dmax:-1:1
+        nodes = partition[d]
+        Threads.@threads for node in nodes
+            # node = nodes[i]
+            length(node) == 0 && continue
+            # allocate necessary interpolation data and perform necessary
+            # precomputations
+            isleaf(node) && _allocate_own_data!(node)
+            if d != 1 # !isroot(node)
+                lock(mutex) do
+                    _allocate_parent_data!(node)
+                end
+            end
+            coneidxs2vals = node.data.coneidx2vals
+            _compute_near_interaction!(y,K,target_tree,source_tree,x,node)
+            isleaf(node) && _compute_own_interpolant!(coneidxs2vals,K,source_tree,x,node)
+            interps = _construct_chebyshev_interpolants(coneidxs2vals,node,plan,droptol)
+            _compute_far_interaction!(y,K,target_tree,node,interps)
+            # transfer node's contribution to parent's interpolant
+            if d != 1 #!isroot(node)
+                lock(mutex) do
+                    _transfer_to_parent!(K,node,interps)
+                end
+            end
+            empty!(coneidxs2vals)
+        end
     end
+end
+
+# TODO: factor the _gemv! and gemv_threaded! codes?
+function _gemv!(y,K,target_tree,source_tree,x,T,droptol)
+    Tv = _density_type_from_kernel_type(T)
+    # do some planning for the fft
+    plan = FFTW.plan_r2r!(zeros(Tv,source_tree.data.p),FFTW.REDFT00;flags=FFTW.PATIENT)
     # initialize a dictionary
     N  = ambient_dimension(target_tree)
     Td = Float64
@@ -138,128 +175,58 @@ function _gemv_threaded!(y,K,target_tree,source_tree,x,T,droptol)
             length(node) == 0 && continue
             # allocate necessary interpolation data and perform necessary
             # precomputations
-            # @timeit_debug "allocate interpolant data" begin
-                _allocate_data!(node)
-                coneidxs2vals = node.data.coneidx2vals
-            #    isempty(mempool) && # push more vals to mempool
-            #    node2vals[node] = pop!(mempool)
-            # end
-            # @timeit_debug "near interactions" begin
-                _compute_near_interaction!(y,K,target_tree,source_tree,x,node)
-            # end
-            # @timeit_debug "leaf interpolants" begin
-                isleaf(node) && _compute_own_interpolant!(coneidxs2vals,K,source_tree,x,node)
-            # end
-            #
-            # @timeit_debug "construct chebyshev interpolants" begin
-                interps = _construct_chebyshev_interpolants(coneidxs2vals,node,plan,droptol)
-            # end
-            # @timeit_debug "far interactions" begin
-                _compute_far_interaction!(y,K,target_tree,node,interps)
-            # end
+            isleaf(node) && _allocate_own_data!(node)
+            if !isroot(node)
+                lock(mutex) do
+                    _allocate_parent_data!(node)
+                end
+            end
+            coneidxs2vals = node.data.coneidx2vals
+            _compute_near_interaction!(y,K,target_tree,source_tree,x,node)
+            isleaf(node) && _compute_own_interpolant!(coneidxs2vals,K,source_tree,x,node)
+            interps = _construct_chebyshev_interpolants(coneidxs2vals,node,plan,droptol)
+            _compute_far_interaction!(y,K,target_tree,node,interps)
             # transfer node's contribution to parent's interpolant
-            # @timeit_debug "transfer to parent" begin
-                !isroot(node) && _transfer_to_parent!(K,node,interps)
-            # end
-            # free interpolation data
+            if !isroot(node)
+                lock(mutex) do
+                    _transfer_to_parent!(K,node,interps)
+                end
+            end
             empty!(coneidxs2vals)
         end
     end
 end
 
-function _gemv!(y,K,target_tree,source_tree,x,T,droptol)
-    Tv = if T <: Number
-        T
-    elseif  T<:SMatrix
-        m,n = size(T)
-        SVector{n,eltype(T)}
-    end
-    # do some planning for the fft
-    @timeit_debug "planning fft" begin
-        plan = FFTW.plan_r2r!(zeros(Tv,source_tree.data.p),FFTW.REDFT00;flags=FFTW.PATIENT)
-    end
-    # initialize a dictionary
-    N  = ambient_dimension(target_tree)
-    Td = Float64
-    node2dict = IdDict{typeof(source_tree), Dict{CartesianIndex{N},NodesAndVals{N,Td,Tv}}}()
-    # iterate over all nodes in source tree, visiting children before parents
-    for node in AbstractTrees.PostOrderDFS(source_tree)
-        length(node) == 0 && continue
-        # allocate necessary interpolation data and perform necessary
-        # precomputations
-        @timeit_debug "allocate interpolant data" begin
-            _allocate_data!(node2dict, node)
-            coneidxs2vals = node2dict[node]
-        #    isempty(mempool) && # push more vals to mempool
-        #    node2vals[node] = pop!(mempool)
-        end
-        @timeit_debug "near interactions" begin
-            _compute_near_interaction!(y,K,target_tree,source_tree,x,node)
-        end
-        # leaf blocks need to update their own interpolant values since they
-        # have no children
-        @timeit_debug "leaf interpolants" begin
-            isleaf(node) && _compute_own_interpolant!(coneidxs2vals,K,source_tree,x,node)
-        end
-        #
-        @timeit_debug "construct chebyshev interpolants" begin
-            interps = _construct_chebyshev_interpolants(coneidxs2vals,node,plan,droptol)
-        end
-        # build interp to far field map
-        # @timeit_debug "cone2far map" begin
-        #     cone2farfield = _cone_to_far(node,Xtree)
-        # end
-        # @timeit_debug "cone2parent map" begin
-        #     cone2parent   = _cone_to_parent(node)
-        # end
-        # handle far targets by interpolation
-        @timeit_debug "far interactions" begin
-            _compute_far_interaction!(y,K,target_tree,node,interps)
-        end
-        # transfer node's contribution to parent's interpolant
-        @timeit_debug "transfer to parent" begin
-            !isroot(node) && _transfer_to_parent!(node2dict,K,node,interps)
-        end
-        # free interpolation data
-        empty!(coneidxs2vals)
-        delete!(node2dict,node)
-        #vals = pop!(node2vals, node)
-        #push!(mempool, vals)
-    end
-    return y
-end
-
-function _allocate_data!(node::SourceTree{N,Td,V,U,Tv}) where {N,Td,V,U,Tv}
+function _allocate_own_data!(node::SourceTree{N,Td,V,U,Tv}) where {N,Td,V,U,Tv}
     # leaves allocate their own interpolant vals
-    if isleaf(node)
-        coneidxs2vals = node.data.coneidx2vals
-        for (I,rec) in active_cone_idxs_and_domains(node)
-            cheb   = cheb2nodes_iter(node.data.p,rec)
-            inodes = map(si->interp2cart(si,node),cheb)
-            vals   = zeros(Tv,node.data.p)
-            push!(coneidxs2vals, I => (inodes,vals))
-        end
-    end
-    # allocate parent data (if needed)
-    if !isroot(node)
-        parent_node = parent(node)
-        coneidxs2vals_parent = parent_node.data.coneidx2vals
-        if isempty(coneidxs2vals_parent)
-            for (I,rec) in active_cone_idxs_and_domains(parent_node)
-                cheb   = cheb2nodes_iter(node.parent.data.p,rec)
-                inodes = map(si->interp2cart(si,node.parent),cheb)
-                vals   = zeros(Tv,node.data.p)
-                push!(coneidxs2vals_parent, I => (inodes,vals))
-            end
-        end
+    coneidxs2vals = node.data.coneidx2vals
+    for (I,rec) in active_cone_idxs_and_domains(node)
+        cheb   = cheb2nodes_iter(node.data.p,rec)
+        inodes = map(si->interp2cart(si,node),cheb)
+        vals   = zeros(Tv,node.data.p)
+        push!(coneidxs2vals, I => (inodes,vals))
     end
     return nothing
+end
+
+function _allocate_parent_data!(node::SourceTree{N,Td,V,U,Tv}) where {N,Td,V,U,Tv}
+    # allocate parent data (if needed)
+    parent_node = parent(node)
+    coneidxs2vals_parent = parent_node.data.coneidx2vals
+    if isempty(coneidxs2vals_parent)
+        for (I,rec) in active_cone_idxs_and_domains(parent_node)
+            cheb   = cheb2nodes_iter(node.parent.data.p,rec)
+            inodes = map(si->interp2cart(si,node.parent),cheb)
+            vals   = zeros(Tv,node.data.p)
+            push!(coneidxs2vals_parent, I => (inodes,vals))
+        end
+    end
 end
 
 function _compute_near_interaction!(C,K,target_tree,source_tree,B,node)
     Xpts = target_tree |> root_elements
     Ypts = source_tree |> root_elements
-    for near_target in near_list(node)
+    Threads.@threads for near_target in near_list(node)
         # near targets use direct evaluation
         for i in index_range(near_target)
             for j in index_range(node)
@@ -307,8 +274,7 @@ end
 
 function _compute_far_interaction!(C,K,target_tree,node,interps)
     Xpts  = target_tree |> root_elements
-    # els = cone_domains(node)
-    for far_target in far_list(node)
+    Threads.@threads for far_target in far_list(node)
         for i in index_range(far_target)
             x       = Xpts[i]
             idxcone = cone_index(coords(x),node)
