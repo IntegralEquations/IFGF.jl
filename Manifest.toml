@@ -47,7 +47,7 @@ version = "3.3.10+0"
 
 [[FastChebInterp]]
 deps = ["FFTW", "StaticArrays"]
-path = "dev/FastChebInterp"
+git-tree-sha1 = "4cc7a10b76e14ddc73d7716ef36dc26609c4359d"
 uuid = "cf66c380-9a80-432c-aff8-4f9c79c0bdde"
 version = "1.0.0"
 

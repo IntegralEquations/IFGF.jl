@@ -9,7 +9,7 @@ using Printf
 using RecipesBase
 import AbstractTrees
 using FastChebInterp
-using FastChebInterp: ChebPoly, chebinterp!, FFTW
+using FastChebInterp: ChebPoly, FFTW
 
 import LinearAlgebra: mul!
 
@@ -25,7 +25,7 @@ WavePropBase.@import_interface
 include("utils.jl")
 include("targettree.jl")
 include("sourcetree.jl")
-include("cheb2nodes.jl")
+include("chebinterp.jl")
 include("ifgfoperator.jl")
 
 export
