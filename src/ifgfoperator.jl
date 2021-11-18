@@ -78,7 +78,7 @@ function _density_type_from_kernel_type(T)
     end
 end
 
-function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOperator, x::AbstractVector, a::Number, b::Number;global_index=true,threads=false,droptol=0)
+function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOperator, x::AbstractVector, a::Number, b::Number;global_index=true,threads=false)
     # since the IFGF represents A = Pr*K*Pc, where Pr and Pc are row and column
     # permutations, we need first to rewrite C <-- b*C + a*(Pc*H*Pb)*B as
     # C <-- Pr*(b*inv(Pr)*C + a*H*(Pc*B)). Following this rewrite, the
@@ -103,7 +103,7 @@ function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOperator, x::AbstractVecto
     if threads
         _gemv_threaded!(y,K,rtree,ctree,x,T,Val(A.p))
     else
-        _gemv!(y,K,rtree,ctree,x,T,droptol)
+        _gemv!(y,K,rtree,ctree,x,T,Val(A.p))
     end
     # permute output
     global_index && invpermute!(y,loc2glob(rtree))
@@ -112,7 +112,6 @@ function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOperator, x::AbstractVecto
 end
 
 function _gemv_threaded!(y,K,target_tree,source_tree,x,T,p::Val{P}) where {P}
-    mutex = ReentrantLock()
     Tv = _density_type_from_kernel_type(T)
     # do some planning for the fft
     plan = FFTW.plan_r2r!(zeros(Tv,P),FFTW.REDFT00;flags=FFTW.PATIENT)
@@ -127,10 +126,10 @@ function _gemv_threaded!(y,K,target_tree,source_tree,x,T,p::Val{P}) where {P}
     dmax = length(partition)
     times = zeros(dmax)
     for d in dmax:-1:1
+        mutex = ReentrantLock()
         times[d] = @elapsed begin
             nodes = partition[d]
-            Threads.@threads for node in nodes
-                # node = nodes[i]
+            for node in nodes
                 length(node) == 0 && continue
                 # allocate necessary interpolation data and perform necessary
                 # precomputations
@@ -158,11 +157,10 @@ function _gemv_threaded!(y,K,target_tree,source_tree,x,T,p::Val{P}) where {P}
     @debug "time per depth: $times"
 end
 
-# TODO: factor the _gemv! and gemv_threaded! codes?
-function _gemv!(y,K,target_tree,source_tree,x,T,droptol)
+function _gemv_threaded2!(y,K,target_tree,source_tree,x,T,p::Val{P}) where {P}
     Tv = _density_type_from_kernel_type(T)
     # do some planning for the fft
-    plan = FFTW.plan_r2r!(zeros(Tv,source_tree.data.p),FFTW.REDFT00;flags=FFTW.PATIENT)
+    plan = FFTW.plan_r2r!(zeros(Tv,P),FFTW.REDFT00;flags=FFTW.PATIENT)
     # initialize a dictionary
     N  = ambient_dimension(target_tree)
     Td = Float64
@@ -170,35 +168,43 @@ function _gemv!(y,K,target_tree,source_tree,x,T,droptol)
     # deepest to shallowest. Nodes of a fixed depth are mostly independent and
     # thus can spawn different tasks, (except for some "small" parts where they transfer
     # data to their parent or push into a dict). For that part, we use a lock.
-    partition = Trees.partition_by_depth(source_tree)
-    dmax = length(partition)
-    for d in dmax:-1:1
-        nodes = partition[d]
-        n = length(nodes)
-        for i in 1:n
-            node = nodes[i]
-            length(node) == 0 && continue
-            # allocate necessary interpolation data and perform necessary
-            # precomputations
-            isleaf(node) && _allocate_own_data!(node)
-            if !isroot(node)
-                lock(mutex) do
-                    _allocate_parent_data!(node)
-                end
-            end
-            coneidxs2vals = node.data.coneidx2vals
-            _compute_near_interaction!(y,K,target_tree,source_tree,x,node)
-            isleaf(node) && _compute_own_interpolant!(coneidxs2vals,K,source_tree,x,node)
-            interps = _construct_chebyshev_interpolants(coneidxs2vals,node,plan)
-            _compute_far_interaction!(y,K,target_tree,node,interps,P)
-            # transfer node's contribution to parent's interpolant
-            if !isroot(node)
-                lock(mutex) do
-                    _transfer_to_parent!(K,node,interps)
-                end
-            end
-            empty!(coneidxs2vals)
-        end
+    nt = Threads.nthreads()
+    times = zeros(nt)
+    yy = [zero(y) for _ in 1:nt]
+    chd  = children(source_tree)
+    Threads.@threads for i in 1:nt
+        times[i] = @elapsed _gemv!(yy[i],K,target_tree,chd[i],x,T,p)
+    end
+    @info times
+    for i in 1:nt
+        axpy!(1,yy[i],y)
+    end
+    return y
+end
+
+
+function _gemv!(y,K,target_tree,source_tree,x,T,p::Val{P}) where {P}
+    Tv = _density_type_from_kernel_type(T)
+    # do some planning for the fft
+    plan = FFTW.plan_r2r!(zeros(Tv,P),FFTW.REDFT00;flags=FFTW.PATIENT)
+    # the threading strategy is to partition the tree by depth, then go from
+    # deepest to shallowest. Nodes of a fixed depth are mostly independent and
+    # thus can spawn different tasks, (except for some "small" parts where they transfer
+    # data to their parent or push into a dict). For that part, we use a lock.
+    for node in PostOrderDFS(source_tree)
+        length(node) == 0 && continue
+        # allocate necessary interpolation data and perform necessary
+        # precomputations
+        isleaf(node) && _allocate_own_data!(node,p)
+        isroot(node) || _allocate_parent_data!(node,p)
+        coneidxs2vals = node.data.coneidx2vals
+        _compute_near_interaction!(y,K,target_tree,source_tree,x,node)
+        isleaf(node) && _compute_own_interpolant!(coneidxs2vals,K,source_tree,x,node)
+        interps = _construct_chebyshev_interpolants(coneidxs2vals,node,plan)
+        _compute_far_interaction!(y,K,target_tree,node,interps,p)
+        # transfer node's contribution to parent's interpolant
+        isroot(node) || _transfer_to_parent!(K,node,interps,p)
+        empty!(coneidxs2vals)
     end
 end
 
@@ -231,7 +237,7 @@ end
 function _compute_near_interaction!(C,K,target_tree,source_tree,B,node)
     Xpts = target_tree |> root_elements
     Ypts = source_tree |> root_elements
-    Threads.@threads for near_target in near_list(node)
+    for near_target in near_list(node)
         # near targets use direct evaluation
         I = index_range(near_target)
         J = index_range(node)
