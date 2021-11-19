@@ -1,10 +1,3 @@
-"""
-    NodesAndVals{N,Td,T} = Tuple{Array{SVector{N,Td},N},Array{T,N}}
-
-For storing the Chebyshev nodes and interpolation values.
-"""
-const NodesAndVals{N,Td,T} = Tuple{Array{SVector{N,Td},N},Array{T,N}}
-
 mutable struct SourceTreeData{N,Td,U,Tv}
     # mesh of cone interpolation domains
     # it defines HyperRectangles coordinates in interpolation coordinates `s`
@@ -16,7 +9,7 @@ mutable struct SourceTreeData{N,Td,U,Tv}
     # elements that cannot be interpolated
     near_list::Vector{TargetTree{N,Td,U}}
     # map from coneindex I to the interpolation nodes and values on the cone I.
-    coneidx2vals::Dict{CartesianIndex{N},NodesAndVals{N,Td,Tv}}
+    interps::Dict{CartesianIndex{N},ChebPoly{N,Tv,Td}}
 end
 function SourceTreeData{N,Td,U,Tv}() where {N,Td,U,Tv}
     if N == 2
@@ -31,11 +24,13 @@ function SourceTreeData{N,Td,U,Tv}() where {N,Td,U,Tv}
     idxs      = Set{CartesianIndex{N}}()
     far_list  = Vector{TargetTree{N,Td,U}}()
     near_list = Vector{TargetTree{N,Td,U}}()
-    coneidx2vals = Dict{CartesianIndex{N},NodesAndVals{N,Td,Tv}}()
-    return SourceTreeData{N,Td,U,Tv}(msh,idxs,far_list,near_list,coneidx2vals)
+    interps = Dict{CartesianIndex{N},ChebPoly{N,Tv,Td}}()
+    return SourceTreeData{N,Td,U,Tv}(msh,idxs,far_list,near_list,interps)
 end
 
 const SourceTree{N,Td,V,U,Tv} = ClusterTree{V,HyperRectangle{N,Td},SourceTreeData{N,Td,U,Tv}}
+
+interps(tree::SourceTree) = tree.data.interps
 
 # getters
 cone_interp_msh(t::SourceTree)  = t.data.cone_interp_msh

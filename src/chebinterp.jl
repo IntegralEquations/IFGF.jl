@@ -108,3 +108,5 @@ end
         return muladd(xd, bₖ, c₁) - bₖ₊₁
     end
 end
+
+ChebPoly(rec::HyperRectangle,vals::Array) = ChebPoly(vals,low_corner(rec),high_corner(rec))
