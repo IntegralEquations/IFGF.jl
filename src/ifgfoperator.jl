@@ -27,8 +27,8 @@ end
 
 """
     IFGFOperator(kernel,
-                 Ypoints::Vector{V},
-                 Xpoints::Vector{U};
+                 Ypoints,
+                 Xpoints;
                  splitter,
                  p,
                  ds_func) where {V,U}
@@ -50,16 +50,17 @@ initialized (i.e. the interaction list and the cone list are computed).
              In 2D, `ds = (dss,dsθ)`.
 """
 function IFGFOperator(kernel,
-                      Ypoints::Vector{U},
-                      Xpoints::Vector{V};
+                      Ypoints,
+                      Xpoints;
                       splitter,
                       p,
-                      ds_func) where {U,V}
+                      ds_func)
     # infer the type of the matrix
+    U,V = eltype(Xpoints), eltype(Ypoints)
     T = hasmethod(return_type,Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel,U,V)
     assert_concrete_type(T)
     Tv = _density_type_from_kernel_type(T)
-    source_tree = initialize_source_tree(;Ypoints,splitter,Xdatatype=U,Vdatatype=Tv)
+    source_tree = initialize_source_tree(;Ypoints,splitter,Xdatatype=typeof(Xpoints),Vdatatype=Tv)
     target_tree = initialize_target_tree(;Xpoints,splitter)
     compute_interaction_list!(source_tree,target_tree)
     compute_cone_list!(source_tree,p,ds_func)
@@ -97,7 +98,6 @@ function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOperator, x::AbstractVecto
         x = a*x # new copy of x
     end
     iszero(b) ? fill!(y,zero(eltype(y))) : rmul!(y,b)
-
     # extract the kernel and place a function barrier for heavy computation
     K     = kernel(A)
     if threads
@@ -149,9 +149,9 @@ function _gemv!(C,K,target_tree,source_tree,B,T,p::Val{P}) where {P}
         length(node) == 0 && continue
         # allocate necessary interpolation data and perform necessary
         # precomputations
-        _construct_chebyshev_interpolants!(node,K,B,p,plan)
-        _compute_far_interaction!(C,K,target_tree,node,p)
-        _compute_near_interaction!(C,K,target_tree,source_tree,B,node)
+        @timeit_debug "Interpolant construction" _construct_chebyshev_interpolants!(node,K,B,p,plan)
+        @timeit_debug "Far field contributions"  _compute_far_interaction!(C,K,target_tree,node,p)
+        @timeit_debug "Near field contributions" _compute_near_interaction!(C,K,target_tree,source_tree,B,node)
     end
     # since root has not parent, its data is not freed in the
     # `construct_chebyshev_interpolants`, so free it here
@@ -162,6 +162,7 @@ function _construct_chebyshev_interpolants!(node::SourceTree{N,Td,V,U,Tv},K,B,p:
     Ypts = node |> root_elements
     interps = node.data.interps
     sizehint!(interps,length(node.data.active_cone_idxs))
+    emax = 0.0
     for (I,rec) in active_cone_idxs_and_domains(node)
         s          = cheb2nodes_iter(P,rec) # cheb points in parameter space
         x          = map(si->interp2cart(si,node),s) # cheb points in physical space
@@ -171,10 +172,10 @@ function _construct_chebyshev_interpolants!(node::SourceTree{N,Td,V,U,Tv},K,B,p:
             for i in eachindex(x)
                 xi = x[i] # cartesian coordinate of node
                 # add sum of factored part of kernel to the interpolation point
-                fact = 1/centered_factor(K,xi,node) # defaults to 1/K
                 for j in index_range(node)
-                    vals[i] += K(xi, Ypts[j])*B[j]*fact
+                    vals[i] += K(xi, Ypts[j])*B[j]
                 end
+                vals[i] /= centered_factor(K,xi,node)
             end
         else
             # non-leaf nodes accumulate interp vals from their children
@@ -189,8 +190,8 @@ function _construct_chebyshev_interpolants!(node::SourceTree{N,Td,V,U,Tv},K,B,p:
                 end
             end
         end
-        chebcoefs!(vals,plan)
-        interps[I] = ChebPoly(rec,vals)
+        coefs = chebcoefs!(vals,plan)
+        interps[I] = ChebPoly(rec,coefs)
     end
     # interps on children no longer needed
     for chd in children(node)
@@ -199,10 +200,37 @@ function _construct_chebyshev_interpolants!(node::SourceTree{N,Td,V,U,Tv},K,B,p:
     return node
 end
 
-function _compute_far_interaction!(C,K,target_tree,node,p)
+function cheb_error_estimate(coefs::Array{T,N}) where {T,N}
+    sz = size(coefs)
+    er = 0.0
+    for I in CartesianIndices(coefs)
+        any(Tuple(I) .== sz) || continue
+        c = coefs[I]
+        er = max(er,norm(c,2))
+    end
+    return er
+end
+
+function _compute_far_interaction_threads!(C,K,target_tree,node,p)
     interps = node.data.interps
     Xpts  = target_tree |> root_elements
     Threads.@threads for far_target in far_list(node)
+        for i in index_range(far_target)
+            x       = Xpts[i]
+            idxcone = cone_index(coords(x),node)
+            s       = cart2interp(coords(x),node)
+            poly    = interps[idxcone]
+            # @assert s ∈ els[idxcone]
+            C[i] += poly(s,p) * centered_factor(K,x,node)
+        end
+    end
+    return nothing
+end
+
+function _compute_far_interaction!(C,K,target_tree,node,p)
+    interps = node.data.interps
+    Xpts  = target_tree |> root_elements
+    for far_target in far_list(node)
         for i in index_range(far_target)
             x       = Xpts[i]
             idxcone = cone_index(coords(x),node)
@@ -222,6 +250,25 @@ function _compute_near_interaction!(C,K,target_tree,source_tree,B,node)
         # near targets use direct evaluation
         I = index_range(near_target)
         J = index_range(node)
+        # FIXME: if we assume that if there is an i=j, then the points will be
+        # the same and for singular kernels we should skip it. That is not
+        # always the case (non-singular kernels and different surfaces).
+        if !isempty(intersect(I,J))
+            _near_interaction!(C,K,Xpts,Ypts,B,I,J)
+        else
+            near_interaction!(C,K,Xpts,Ypts,B,I,J)
+        end
+    end
+    return nothing
+end
+
+function _compute_near_interaction_threads!(C,K,target_tree,source_tree,B,node)
+    Xpts = target_tree |> root_elements
+    Ypts = source_tree |> root_elements
+    Threads.@threads for near_target in near_list(node)
+        # near targets use direct evaluation
+        I = index_range(near_target)
+        J = index_range(node)
         near_interaction!(view(C,I),K,view(Xpts,I),view(Ypts,J),view(B,J))
     end
     return nothing
@@ -232,16 +279,17 @@ end
 
 Compute `C[i] <-- C[i] + ∑ⱼ K(X[i],Y[j])*σ[j]`.
 """
-function near_interaction!(C,K,X,Y,σ)
-    m,n = length(X), length(Y)
-    @assert length(C) == m
-    @assert length(σ) == n
-    for i in 1:m
-        for j in 1:n
+near_interaction!(C,K,X,Y,σ,I,J) = _near_interaction!(C,K,X,Y,σ,I,J)
+
+function _near_interaction!(C,K,X,Y,σ,I,J)
+    for i in I
+        for j in J
+            i == j && continue
             C[i] += K(X[i], Y[j]) * σ[j]
         end
     end
 end
+
 
 # generic fallback. May need to be overloaded for specific kernels.
 function centered_factor(K,x,ysource::SourceTree)

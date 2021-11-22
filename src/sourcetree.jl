@@ -131,20 +131,19 @@ function cart2interp(x,source::SourceTree{N}) where {N}
 end
 
 """
-    initialize_source_tree(;Ypoints::Vector{V},datatype,splitter,Xdatatype) where V
+    initialize_source_tree(;points,datatype,splitter,Xdatatype)
 
 Create the tree-structure for clustering the source `points` using the splitting
 strategy of `splitter`, returning a `SourceTree` with an empty `data` field
 (i.e. `data = SourceTreeData()`).
 
 # Arguments
-- `Ypoints`: vector of source points.
-- `datatype`: return type of the IFGF method (e.g. `Float64` or `SVector{3,ComplexF64}`).
+- `points`: vector of source points.
 - `splitter`: splitting strategy.
-- `Xdatatype`: type of target points.
+- `Xdatatype`: type container of target points.
 - `Vdatatype`: type of value stored at interpolation nodes
 """
-function initialize_source_tree(;Ypoints::Vector{V},splitter,Xdatatype,Vdatatype) where V
+function initialize_source_tree(;Ypoints,splitter,Xdatatype,Vdatatype)
     coords_datatype = Ypoints |> first |> coords |> typeof
     @assert coords_datatype <: SVector
     @assert isconcretetype(Xdatatype)
