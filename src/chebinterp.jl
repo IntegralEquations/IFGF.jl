@@ -61,7 +61,7 @@ function chebcoefs!(vals::AbstractArray{<:Number,N},plan::FFTW.FFTWPlan) where {
     return coefs
 end
 
-@fastmath function (interp::ChebPoly{N})(x::SVector{N,<:Real},sz::Val{SZ}) where {N,SZ}
+@fastmath function chebeval(interp::ChebPoly,x::SVector{N,<:Real},sz::Val{SZ}) where {N,SZ}
     x0 = @. (x - interp.lb) * 2 / (interp.ub - interp.lb) - 1
     all(abs.(x0) .≤ 1 + 1e-8) || throw(ArgumentError("$x not in domain. lb = $(interp.lb), ub=$(interp.ub)"))
     return evaluate(x0, interp.coefs, Val{N}(), 1, length(interp.coefs),sz)
