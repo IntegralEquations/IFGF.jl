@@ -67,7 +67,12 @@ end
     return evaluate(x0, interp.coefs, Val{N}(), 1, length(interp.coefs),sz)
 end
 
-@fastmath function evaluate(x::SVector{N}, c::Array{<:Any,N}, ::Val{dim}, i1, len, sz::Val{SZ}) where {N,dim,SZ}
+@fastmath function chebeval(coefs,x::SVector{N,<:Real},rec::HyperRectangle,sz::Val{SZ}) where {N,SZ}
+    x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
+    return evaluate(x0, coefs, Val{N}(), 1, length(coefs),sz)
+end
+
+@fastmath function evaluate(x::SVector{N}, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {N,dim,SZ}
     n = SZ[dim]
     @inbounds xd = x[dim]
     if dim == 1

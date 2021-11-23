@@ -155,99 +155,96 @@ function _gemv!(C,K,target_tree,source_tree,B,T,p::Val{P}) where {P}
     end
     # since root has not parent, its data is not freed in the
     # `construct_chebyshev_interpolants`, so free it here
-    empty!(source_tree.data.interps)
+    free_buffer!(source_tree)
 end
 
 function _construct_chebyshev_interpolants_threads!(node::SourceTree{N,Td,V,U,Tv},K,B,p::Val{P},plan) where {N,Td,V,U,Tv,P}
     Ypts = node |> root_elements
     interps = node.data.interps
+    allocate_buffer!(node,P)
+    buffer = node.data.interps_data
     sizehint!(interps,length(node.data.active_cone_idxs))
-    emax = 0.0
     for (I,rec) in active_cone_idxs_and_domains(node)
         s          = cheb2nodes_iter(P,rec) # cheb points in parameter space
         x          = map(si->interp2cart(si,node),s) |> vec |> collect # cheb points in physical space
         irange = 1:length(x)
         jrange = index_range(node)
-        vals       = zeros(Tv,P)
+        # vals       = zeros(Tv,P)
+        k          = node.data.active_cone_idxs[I]
+        vals       = @views buffer[prod(P)*(k-1)+1:prod(P)*k]
         if isleaf(node)
-            near_interaction!(vals,K,x,Ypts,B,irange,jrange)
             # leaf nodes compute their own interp vals
+            near_interaction!(vals,K,x,Ypts,B,irange,jrange)
             for i in eachindex(x)
                 xi = x[i] # cartesian coordinate of node
-                # add sum of factored part of kernel to the interpolation point
-                # for j in index_range(node)
-                #     vals[i] += K(xi, Ypts[j])*B[j]
-                # end
                 vals[i] /= centered_factor(K,xi,node)
             end
         else
             # non-leaf nodes accumulate interp vals from their children
             for chd in children(node)
+                buffer_chd = chd.data.interps_data
                 length(chd) == 0 && continue
                 for i in eachindex(x)
                     idxcone   = cone_index(x[i], chd)
                     si        = cart2interp(x[i],chd)
-                    poly      = chd.data.interps[idxcone]
                     # transfer block's interpolant to parent's interpolants
-                    vals[i] += chebeval(poly,si,p) * transfer_factor(K,x[i],chd)
+                    rec  = cone_domains(chd)[idxcone]
+                    k    = chd.data.active_cone_idxs[idxcone]
+                    coefs   = @views buffer_chd[prod(P)*(k-1)+1:prod(P)*k]
+                    vals[i] += chebeval(coefs,si,rec,p) * transfer_factor(K,x[i],chd)
                 end
             end
         end
-        coefs = chebcoefs!(vals,plan)
-        interps[I] = ChebPoly(rec,coefs)
+        coefs = chebcoefs!(reshape(vals,P...),plan)
     end
     # interps on children no longer needed
     for chd in children(node)
-        empty!(chd.data.interps)
+        free_buffer!(chd)
     end
     return node
 end
 
 function _construct_chebyshev_interpolants!(node::SourceTree{N,Td,V,U,Tv},K,B,p::Val{P},plan) where {N,Td,V,U,Tv,P}
     Ypts = node |> root_elements
-    interps = node.data.interps
-    sizehint!(interps,length(node.data.active_cone_idxs))
-    emax = 0.0
+    allocate_buffer!(node,P)
     for (I,rec) in active_cone_idxs_and_domains(node)
         s          = cheb2nodes_iter(P,rec) # cheb points in parameter space
         x          = map(si->interp2cart(si,node),s) |> vec |> collect # cheb points in physical space
         irange = 1:length(x)
         jrange = index_range(node)
-        vals       = zeros(Tv,P)
+        vals       = getbuffer(node,I,P)
         if isleaf(node)
             @timeit_debug "leaf interpolants by direct sum" begin
-                near_interaction!(vals,K,x,Ypts,B,irange,jrange)
                 # leaf nodes compute their own interp vals
+                near_interaction!(vals,K,x,Ypts,B,irange,jrange)
                 for i in eachindex(x)
                     xi = x[i] # cartesian coordinate of node
-                    # add sum of factored part of kernel to the interpolation point
-                    # for j in index_range(node)
-                    #     vals[i] += K(xi, Ypts[j])*B[j]
-                    # end
                     vals[i] /= centered_factor(K,xi,node)
                 end
             end
         else
-            @timeit_debug "interpolant tranfered from children" begin
+            @timeit_debug "interpolant transfered from children" begin
                 # non-leaf nodes accumulate interp vals from their children
                 for chd in children(node)
                     length(chd) == 0 && continue
                     for i in eachindex(x)
                         idxcone   = cone_index(x[i], chd)
                         si        = cart2interp(x[i],chd)
-                        poly      = chd.data.interps[idxcone]
                         # transfer block's interpolant to parent's interpolants
-                        vals[i] += chebeval(poly,si,p) * transfer_factor(K,x[i],chd)
+                        rec  = cone_domains(chd)[idxcone]
+                        coefs = getbuffer(chd,idxcone,P)
+                        vals[i] += chebeval(coefs,si,rec,p) * transfer_factor(K,x[i],chd)
                     end
                 end
             end
         end
-        coefs = chebcoefs!(vals,plan)
-        interps[I] = ChebPoly(rec,coefs)
+        @timeit_debug "compute cheb coeffs" begin
+            coefs = chebcoefs!(reshape(vals,P...),plan)
+        end
     end
     # interps on children no longer needed
     for chd in children(node)
-        empty!(chd.data.interps)
+        free_buffer!(chd)
     end
     return node
 end
@@ -263,29 +260,12 @@ function cheb_error_estimate(coefs::Array{T,N}) where {T,N}
     return er
 end
 
-function _compute_far_interaction_threads!(C,K,target_tree,node,p)
-    interps = node.data.interps
-    Xpts  = target_tree |> root_elements
-    for far_target in far_list(node)
-        for i in index_range(far_target)
-            x       = Xpts[i]
-            idxcone = cone_index(coords(x),node)
-            s       = cart2interp(coords(x),node)
-            poly    = interps[idxcone]
-            # @assert s ∈ els[idxcone]
-            C[i] += chebeval(poly,s,p) * centered_factor(K,x,node)
-        end
-    end
-    return nothing
-end
-
 # TODO: for each active cone, store a vector with (i,s) for each index in the
 # far field that is going to be interpolated. This allows doing many of the
 # computations offline at the cost of "a bit" extra memory, and more importantly
 # allows for vectorization of the cheb poly evaluation
-function _compute_far_interaction!(C,K,target_tree,node,p)
-    N = ambient_dimension(node)
-    interps = node.data.interps
+function _compute_far_interaction!(C,K,target_tree,node,p::Val{P}) where {P}
+    # buffer = reshape(node.data.interps_data,P...,:)
     Xpts  = target_tree |> root_elements
     # i2node = Dict{CartesianIndex{N},Vector{Tuple{Int,SVector{N,Float64}}}}()
     # for far_target in far_list(node)
@@ -309,11 +289,11 @@ function _compute_far_interaction!(C,K,target_tree,node,p)
     for far_target in far_list(node)
         for i in index_range(far_target)
             x       = Xpts[i]
-            idxcone = cone_index(coords(x),node)
+            I       = cone_index(coords(x),node)
             s       = cart2interp(coords(x),node)
-            poly    = interps[idxcone]
-            # @assert s ∈ els[idxcone]
-            C[i] += chebeval(poly,s,p) * centered_factor(K,Xpts[i],node)
+            rec     = cone_domains(node)[I]
+            coefs   = getbuffer(node,I,P)
+            C[i]  += chebeval(coefs,s,rec,p) * centered_factor(K,Xpts[i],node)
         end
     end
     return nothing
@@ -328,7 +308,8 @@ function _compute_near_interaction!(C,K,target_tree,source_tree,B,node)
         J = index_range(node)
         # FIXME: if we assume that if there is an i=j, then the points will be
         # the same and for singular kernels we should skip it. That is not
-        # always the case (non-singular kernels and different surfaces).
+        # always the case (non-singular kernels and different surfaces). How
+        # should we handle this?
         if !isempty(intersect(I,J))
             _near_interaction!(C,K,Xpts,Ypts,B,I,J)
         else
