@@ -3,7 +3,7 @@ mutable struct SourceTreeData{N,Td,U,Tv}
     # it defines HyperRectangles coordinates in interpolation coordinates `s`
     cone_interp_msh::UniformCartesianMesh{N,Td}
     # active cone indices
-    active_cone_idxs::Set{CartesianIndex{N}}
+    active_cone_idxs::Vector{CartesianIndex{N}}
     # elements that can be interpolated
     far_list::Vector{TargetTree{N,Td,U}}
     # elements that cannot be interpolated
@@ -21,7 +21,7 @@ function SourceTreeData{N,Td,U,Tv}() where {N,Td,U,Tv}
     else
         notimplemented()
     end
-    idxs      = Set{CartesianIndex{N}}()
+    idxs      = Vector{CartesianIndex{N}}()
     far_list  = Vector{TargetTree{N,Td,U}}()
     near_list = Vector{TargetTree{N,Td,U}}()
     interps = Dict{CartesianIndex{N},ChebPoly{N,Tv,Td}}()
@@ -252,15 +252,18 @@ function initialize_cone_interpolant!(source::SourceTree,p,ds_func)
     domain         = compute_interpolation_domain(source,p)
     all(low_corner(domain) .< high_corner(domain)) || (return source)
     _init_cone_interp_msh!(source,domain,ds) # init cone interpolation domains
-    # initialize all cones needed to cover far field
+    # initialize all cones needed to cover far field. Use a Set to fill in the
+    # unique indices, then convert that to a vector.
+    N = ambient_dimension(source)
+    active_cones = Set{CartesianIndex{N}}()
     for far_target in far_list(source)
         for el in Trees.elements(far_target) # target points
             idxcone = cone_index(center(el),source)
-            idxcone ∈ active_cone_idxs(source) && continue
-            _addtoconeidxs!(source,idxcone)
+            push!(active_cones,idxcone)
         end
     end
-    # if not a root, also create all cones needed to cover interpolation points of parents
+    # if not a root, also create all cones needed to cover interpolation points
+    # of parents
     if !isroot(source)
         source_parent = parent(source)
         for rec in active_cone_domains(source_parent) # active HyperRectangles
@@ -270,12 +273,12 @@ function initialize_cone_interpolant!(source::SourceTree,p,ds_func)
                 xi = interp2cart(si,source_parent)
                 # mesh index for interpolation point
                 idxcone = cone_index(xi,source)
-                # initialize cone if needed
-                idxcone ∈ active_cone_idxs(source) && continue
-                _addtoconeidxs!(source,idxcone)
+                # push to list
+                push!(active_cones,idxcone)
             end
         end
     end
+    source.data.active_cone_idxs = collect(active_cones)
     return source
 end
 
