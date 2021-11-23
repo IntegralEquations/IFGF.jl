@@ -63,7 +63,7 @@ function IFGFOperator(kernel,
     source_tree = initialize_source_tree(;Ypoints,splitter,Xdatatype=typeof(Xpoints),Vdatatype=Tv)
     target_tree = initialize_target_tree(;Xpoints,splitter)
     compute_interaction_list!(source_tree,target_tree)
-    compute_cone_list!(source_tree,p,ds_func)
+    compute_cone_list!(source_tree,target_tree,p,ds_func)
     ifgf = IFGFOperator{T}(kernel, target_tree, source_tree, p)
     return ifgf
 end
@@ -265,37 +265,25 @@ end
 # computations offline at the cost of "a bit" extra memory, and more importantly
 # allows for vectorization of the cheb poly evaluation
 function _compute_far_interaction!(C,K,target_tree,node,p::Val{P}) where {P}
-    # buffer = reshape(node.data.interps_data,P...,:)
     Xpts  = target_tree |> root_elements
-    # i2node = Dict{CartesianIndex{N},Vector{Tuple{Int,SVector{N,Float64}}}}()
-    # for far_target in far_list(node)
-    #     for i in index_range(far_target)
-    #         x       = Xpts[i]
-    #         idxcone = cone_index(coords(x),node)
-    #         s       = cart2interp(coords(x),node)
-    #         if haskey(i2node,idxcone)
-    #             push!(i2node[idxcone],(i,s))
-    #         else
-    #             i2node[idxcone] = [(i,s)]
-    #         end
-    #     end
-    # end
-    # for (I,idxs) in i2node
-    #     poly    = interps[I]
-    #     for (i,s) in idxs
-    #         C[i] += chebeval(poly,s,p) * centered_factor(K,Xpts[i],node)
-    #     end
-    # end
-    for far_target in far_list(node)
-        for i in index_range(far_target)
-            x       = Xpts[i]
-            I       = cone_index(coords(x),node)
-            s       = cart2interp(coords(x),node)
-            rec     = cone_domains(node)[I]
-            coefs   = getbuffer(node,I,P)
+    for (I,idxs) in node.data.faridxs
+        rec     = cone_domains(node)[I]
+        coefs   = getbuffer(node,I,P)
+        for i in idxs
+            s    = cart2interp(coords(Xpts[i]),node)
             C[i]  += chebeval(coefs,s,rec,p) * centered_factor(K,Xpts[i],node)
         end
     end
+    # for far_target in far_list(node)
+    #     for i in index_range(far_target)
+    #         x       = Xpts[i]
+    #         I       = cone_index(coords(x),node)
+    #         s       = cart2interp(coords(x),node)
+    #         rec     = cone_domains(node)[I]
+    #         coefs   = getbuffer(node,I,P)
+    #         C[i]  += chebeval(coefs,s,rec,p) * centered_factor(K,Xpts[i],node)
+    #     end
+    # end
     return nothing
 end
 

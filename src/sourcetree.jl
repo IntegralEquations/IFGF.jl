@@ -9,6 +9,8 @@ mutable struct SourceTreeData{N,Td,U,Tv}
     near_list::Vector{TargetTree{N,Td,U}}
     # buffer used to store interpolation data associated with node.
     _buffer::Vector{Tv}
+    #
+    faridxs::Dict{CartesianIndex{N},Vector{Int}}
 end
 function SourceTreeData{N,Td,U,Tv}() where {N,Td,U,Tv}
     if N == 2
@@ -24,7 +26,8 @@ function SourceTreeData{N,Td,U,Tv}() where {N,Td,U,Tv}
     far_list         = Vector{TargetTree{N,Td,U}}()
     near_list = Vector{TargetTree{N,Td,U}}()
     buffer = Tv[]
-    return SourceTreeData{N,Td,U,Tv}(msh,cart2linear,far_list,near_list,buffer)
+    faridxs = Dict{CartesianIndex{N},Vector{Int}}()
+    return SourceTreeData{N,Td,U,Tv}(msh,cart2linear,far_list,near_list,buffer,faridxs)
 end
 
 const SourceTree{N,Td,V,U,Tv} = ClusterTree{V,HyperRectangle{N,Td},SourceTreeData{N,Td,U,Tv}}
@@ -91,6 +94,16 @@ function _addtoconeidxs!(s::SourceTree,idxcone)
     dict = s.data._cart_to_linear
     haskey(dict,idxcone) || push!(dict,idxcone=>length(dict)+1)
 end
+
+function _addidxtofarlist!(node::SourceTree,I::CartesianIndex,i)
+    dict = node.data.faridxs
+    if haskey(dict,I)
+        push!(dict[I],i)
+    else
+        push!(dict,I=>[i])
+    end
+end
+
 function _init_cone_interp_msh!(s::SourceTree,domain,ds)
     s.data.cone_interp_msh = UniformCartesianMesh(domain;step=ds)
     return nothing
@@ -265,19 +278,20 @@ function cone_domain_size_func(k,ds = Float64.((1,π/2,π/2)))
     return ds_func
 end
 
-function initialize_cone_interpolant!(source::SourceTree,p,ds_func)
+function initialize_cone_interpolant!(source::SourceTree,target::TargetTree,p,ds_func)
     length(source) == 0 && (return source)
+    X       = root_elements(target)
     ds      = ds_func(source)
     # find minimal axis-aligned bounding box for interpolation points
     domain         = compute_interpolation_domain(source,p)
     all(low_corner(domain) .< high_corner(domain)) || (return source)
-    _init_cone_interp_msh!(source,domain,ds) # init cone interpolation domains
-    # initialize all cones needed to cover far field. Use a Set to fill in the
-    # unique indices, then convert that to a vector.
+    _init_cone_interp_msh!(source,domain,ds)
+    # initialize all cones needed to cover far field.
     for far_target in far_list(source)
-        for el in Trees.elements(far_target) # target points
-            idxcone = cone_index(center(el),source)
+        for i in index_range(far_target) # target points
+            idxcone = cone_index(center(X[i]),source)
             _addtoconeidxs!(source,idxcone)
+            _addidxtofarlist!(source,idxcone,i)
         end
     end
     # if not a root, also create all cones needed to cover interpolation points
@@ -310,9 +324,9 @@ an appropriate interpolation order and meshsize in interpolation space.
 The algorithm starts at the root of the `source` tree, and travels down to the
 leaves.
 """
-function compute_cone_list!(tree::SourceTree,p,ds_func)
+function compute_cone_list!(tree::SourceTree,target,p,ds_func)
     for source in AbstractTrees.PreOrderDFS(tree)
-        initialize_cone_interpolant!(source,p,ds_func)
+        initialize_cone_interpolant!(source,target,p,ds_func)
     end
     return tree
 end
