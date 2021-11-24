@@ -7,10 +7,12 @@ mutable struct SourceTreeData{N,Td,U,Tv}
     far_list::Vector{TargetTree{N,Td,U}}
     # elements that cannot be interpolated
     near_list::Vector{TargetTree{N,Td,U}}
-    # buffer used to store interpolation data associated with node.
-    _buffer::Vector{Tv}
-    #
+    # buffer used to store interpolation values
+    ivals::Vector{Tv}
+    # buffer used to store interpolation nodes
+    ipts::Vector{SVector{N,Td}}
     faridxs::Dict{CartesianIndex{N},Vector{Int}}
+    paridxs::Dict{CartesianIndex{N},Vector{Int}}
 end
 function SourceTreeData{N,Td,U,Tv}() where {N,Td,U,Tv}
     if N == 2
@@ -25,26 +27,28 @@ function SourceTreeData{N,Td,U,Tv}() where {N,Td,U,Tv}
     cart2linear      = Dict{CartesianIndex{N},Int}()
     far_list         = Vector{TargetTree{N,Td,U}}()
     near_list = Vector{TargetTree{N,Td,U}}()
-    buffer = Tv[]
+    ivals = Tv[]
+    ipts = SVector{N,Td}[]
     faridxs = Dict{CartesianIndex{N},Vector{Int}}()
-    return SourceTreeData{N,Td,U,Tv}(msh,cart2linear,far_list,near_list,buffer,faridxs)
+    paridxs = Dict{CartesianIndex{N},Vector{Int}}()
+    return SourceTreeData{N,Td,U,Tv}(msh,cart2linear,far_list,near_list,ivals,ipts,faridxs,paridxs)
 end
 
 const SourceTree{N,Td,V,U,Tv} = ClusterTree{V,HyperRectangle{N,Td},SourceTreeData{N,Td,U,Tv}}
 
 function allocate_buffer!(node::SourceTree,p)
     Tv = density_type(node)
-    node.data._buffer = zeros(Tv,prod(p)*length(active_cone_idxs(node)))
+    node.data.ivals = zeros(Tv,prod(p)*length(active_cone_idxs(node)))
 end
 
 function free_buffer!(node::SourceTree)
     Tv = density_type(node)
-    node.data._buffer = Tv[]
+    node.data.ipts = Tv[]
 end
 
 function getbuffer(node::SourceTree,I::CartesianIndex,P)
     i = linear_cone_index(node,I)
-    @views node.data._buffer[prod(P)*(i-1)+1:prod(P)*i]
+    @views node.data.ivals[prod(P)*(i-1)+1:prod(P)*i]
 end
 
 function linear_cone_index(node::SourceTree,I::CartesianIndex)
@@ -96,6 +100,15 @@ function _addtoconeidxs!(s::SourceTree,idxcone)
 end
 
 function _addidxtofarlist!(node::SourceTree,I::CartesianIndex,i)
+    dict = node.data.faridxs
+    if haskey(dict,I)
+        push!(dict[I],i)
+    else
+        push!(dict,I=>[i])
+    end
+end
+
+function _addidxtoparlist!(node::SourceTree,I::CartesianIndex,i::Int)
     dict = node.data.faridxs
     if haskey(dict,I)
         push!(dict[I],i)
@@ -298,15 +311,18 @@ function initialize_cone_interpolant!(source::SourceTree,target::TargetTree,p,ds
     # of parents
     if !isroot(source)
         source_parent = parent(source)
-        for rec in active_cone_domains(source_parent) # active HyperRectangles
+        for (I,rec) in active_cone_idxs_and_domains(source_parent) # active HyperRectangles
             cheb = cheb2nodes_iter(p,rec)
-            for si in cheb # interpolation node in interpolation space
+            k    = linear_cone_index(source_parent,I)
+            Δi = prod(p)*(k-1)
+            for (iloc,si) in enumerate(cheb) # interpolation node in interpolation space
                 # interpolation node in physical space
                 xi = interp2cart(si,source_parent)
                 # mesh index for interpolation point
                 idxcone = cone_index(xi,source)
                 # push to list
                 _addtoconeidxs!(source,idxcone)
+                _addidxtoparlist!(source,idxcone,Δi+iloc)
             end
         end
     end

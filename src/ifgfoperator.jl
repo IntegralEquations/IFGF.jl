@@ -133,7 +133,7 @@ function _gemv_threaded!(C,K,target_tree,source_tree,B,T,p::Val{P}) where {P}
     end
     # since root has not parent, its data is not freed in the
     # `construct_chebyshev_interpolants`, so free it here
-    empty!(source_tree.data.interps)
+    free_buffer!(source_tree)
     return C
 end
 
@@ -160,37 +160,28 @@ end
 
 function _construct_chebyshev_interpolants_threads!(node::SourceTree{N,Td,V,U,Tv},K,B,p::Val{P},plan) where {N,Td,V,U,Tv,P}
     Ypts = node |> root_elements
-    interps = node.data.interps
     allocate_buffer!(node,P)
-    buffer = node.data.interps_data
-    sizehint!(interps,length(node.data.active_cone_idxs))
     for (I,rec) in active_cone_idxs_and_domains(node)
         s          = cheb2nodes_iter(P,rec) # cheb points in parameter space
         x          = map(si->interp2cart(si,node),s) |> vec |> collect # cheb points in physical space
         irange = 1:length(x)
         jrange = index_range(node)
-        # vals       = zeros(Tv,P)
-        k          = node.data.active_cone_idxs[I]
-        vals       = @views buffer[prod(P)*(k-1)+1:prod(P)*k]
+        vals       = getbuffer(node,I,P)
         if isleaf(node)
-            # leaf nodes compute their own interp vals
             near_interaction!(vals,K,x,Ypts,B,irange,jrange)
             for i in eachindex(x)
                 xi = x[i] # cartesian coordinate of node
                 vals[i] /= centered_factor(K,xi,node)
             end
         else
-            # non-leaf nodes accumulate interp vals from their children
             for chd in children(node)
-                buffer_chd = chd.data.interps_data
                 length(chd) == 0 && continue
                 for i in eachindex(x)
                     idxcone   = cone_index(x[i], chd)
                     si        = cart2interp(x[i],chd)
                     # transfer block's interpolant to parent's interpolants
                     rec  = cone_domains(chd)[idxcone]
-                    k    = chd.data.active_cone_idxs[idxcone]
-                    coefs   = @views buffer_chd[prod(P)*(k-1)+1:prod(P)*k]
+                    coefs = getbuffer(chd,idxcone,P)
                     vals[i] += chebeval(coefs,si,rec,p) * transfer_factor(K,x[i],chd)
                 end
             end
@@ -224,7 +215,6 @@ function _construct_chebyshev_interpolants!(node::SourceTree{N,Td,V,U,Tv},K,B,p:
             end
         else
             @timeit_debug "interpolant transfered from children" begin
-                # non-leaf nodes accumulate interp vals from their children
                 for chd in children(node)
                     length(chd) == 0 && continue
                     for i in eachindex(x)
@@ -355,7 +345,7 @@ function Base.show(io::IO,ifgf::IFGFOperator)
     leaves = collect(Leaves(ctree))
     println("\t number of nodes:                $(length(nodes))")
     println("\t number of leaves:               $(length(leaves))")
-    println("\t number of active cones:         $(sum(x->length(x.data.active_cone_idxs),nodes))")
-    println("\t maximum number of active cones: $(maximum(x->length(x.data.active_cone_idxs),nodes))")
+    println("\t number of active cones:         $(sum(x->length(active_cone_idxs(x)),nodes))")
+    println("\t maximum number of active cones: $(maximum(x->length(active_cone_idxs(x)),nodes))")
 end
 Base.show(io::IO,::MIME"text/plain",ifgf::IFGFOperator) = show(io,ifgf)
