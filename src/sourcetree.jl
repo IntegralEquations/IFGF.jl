@@ -14,6 +14,7 @@ mutable struct SourceTreeData{N,Td,U,Tv}
     faridxs::Dict{CartesianIndex{N},Vector{Int}}
     paridxs::Dict{CartesianIndex{N},Vector{Int}}
 end
+
 function SourceTreeData{N,Td,U,Tv}() where {N,Td,U,Tv}
     if N == 2
         domain = HyperRectangle{2,Td}((0,0),(0,0))

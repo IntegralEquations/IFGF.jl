@@ -263,6 +263,7 @@ function _compute_far_interaction!(C,K,target_tree,node,p::Val{P}) where {P}
             s    = cart2interp(coords(Xpts[i]),node)
             C[i]  += chebeval(coefs,s,rec,p) * centered_factor(K,Xpts[i],node)
         end
+
     end
     # for far_target in far_list(node)
     #     for i in index_range(far_target)
@@ -284,28 +285,8 @@ function _compute_near_interaction!(C,K,target_tree,source_tree,B,node)
         # near targets use direct evaluation
         I = index_range(near_target)
         J = index_range(node)
-        # FIXME: if we assume that if there is an i=j, then the points will be
-        # the same and for singular kernels we should skip it. That is not
-        # always the case (non-singular kernels and different surfaces). How
-        # should we handle this?
-        if !isempty(intersect(I,J))
-            _near_interaction!(C,K,Xpts,Ypts,B,I,J)
-        else
-            near_interaction!(C,K,Xpts,Ypts,B,I,J)
-        end
-    end
-    return nothing
-end
-
-function _compute_near_interaction_threads!(C,K,target_tree,source_tree,B,node)
-    Xpts = target_tree |> root_elements
-    Ypts = source_tree |> root_elements
-    Threads.@threads for near_target in near_list(node)
-        # near targets use direct evaluation
-        I = index_range(near_target)
-        J = index_range(node)
-        near_interaction!(view(C,I),K,view(Xpts,I),view(Ypts,J),view(B,J))
-    end
+        near_interaction!(C,K,Xpts,Ypts,B,I,J)
+   end
     return nothing
 end
 
@@ -314,12 +295,9 @@ end
 
 Compute `C[i] <-- C[i] + ∑ⱼ K(X[i],Y[j])*σ[j]`.
 """
-near_interaction!(C,K,X,Y,σ,I,J) = _near_interaction!(C,K,X,Y,σ,I,J)
-
-function _near_interaction!(C,K,X,Y,σ,I,J)
+function near_interaction!(C,K,X,Y,σ,I,J)
     for i in I
         for j in J
-            i == j && continue
             C[i] += K(X[i], Y[j]) * σ[j]
         end
     end

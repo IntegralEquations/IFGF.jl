@@ -12,7 +12,7 @@ includet(joinpath(IFGF.PROJECT_ROOT,"test","testutils.jl"))
 
 const k = 8π
 λ       = 2π/k
-ppw     = 16
+ppw     = 16[]
 dx      = λ/ppw
 
 struct HelmholtzKernel
@@ -70,11 +70,13 @@ C = zeros(T,nx)
 @hprofile mul!(C,A,B,1,0;threads=false)
 er = norm(C[I]-exa,2) / norm(exa,2)
 @info "" er,nx
+@info Base.summarysize(A)/1e9
 ##
 
 t = @elapsed mul!(C,A,B,1,0;threads=true)
 er = norm(C[I]-exa,2) / norm(exa,2)
 @info "" er,nx,t
+
 
 ##
 

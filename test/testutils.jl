@@ -17,8 +17,9 @@ function _helmholtz3d_sl_fast!(C,X,Y,σ,k)
             s, c = sincos(k * d)
             zr = inv(4π*d) * c
             zi = inv(4π*d) * s
-            C_r[i] += zr*σ_r[j] - zi*σ_i[j]
-            C_i[i] += zi*σ_r[j] + zr*σ_i[j]
+            C_r[i] += (!iszero(d))*(zr*σ_r[j] - zi*σ_i[j])
+            C_i[i] += (!iszero(d))*(zi*σ_r[j] + zr*σ_i[j])
+
         end
     end
     return C
