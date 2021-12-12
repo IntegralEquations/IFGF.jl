@@ -153,20 +153,17 @@ function _gemv!(C,K,target_tree,source_tree,B,T,p::Val{P}) where {P}
         @timeit_debug "Far field contributions"  _compute_far_interaction!(C,K,target_tree,node,p)
         @timeit_debug "Near field contributions" _compute_near_interaction!(C,K,target_tree,source_tree,B,node)
     end
-    # since root has not parent, its data is not freed in the
-    # `construct_chebyshev_interpolants`, so free it here
-    free_buffer!(source_tree)
 end
 
 function _construct_chebyshev_interpolants_threads!(node::SourceTree{N,Td,V,U,Tv},K,B,p::Val{P},plan) where {N,Td,V,U,Tv,P}
     Ypts = node |> root_elements
-    allocate_buffer!(node,P)
+    # allocate_buffer!(node,P)
     for (I,rec) in active_cone_idxs_and_domains(node)
         s          = cheb2nodes_iter(P,rec) # cheb points in parameter space
         x          = map(si->interp2cart(si,node),s) |> vec |> collect # cheb points in physical space
         irange = 1:length(x)
         jrange = index_range(node)
-        vals       = getbuffer(node,I,P)
+        vals       = getbuffer(node,I)
         if isleaf(node)
             near_interaction!(vals,K,x,Ypts,B,irange,jrange)
             for i in eachindex(x)
@@ -181,7 +178,7 @@ function _construct_chebyshev_interpolants_threads!(node::SourceTree{N,Td,V,U,Tv
                     si        = cart2interp(x[i],chd)
                     # transfer block's interpolant to parent's interpolants
                     rec  = cone_domains(chd)[idxcone]
-                    coefs = getbuffer(chd,idxcone,P)
+                    coefs = getbuffer(chd,idxcone)
                     vals[i] += chebeval(coefs,si,rec,p) * transfer_factor(K,x[i],chd)
                 end
             end
@@ -196,45 +193,63 @@ function _construct_chebyshev_interpolants_threads!(node::SourceTree{N,Td,V,U,Tv
 end
 
 function _construct_chebyshev_interpolants!(node::SourceTree{N,Td,V,U,Tv},K,B,p::Val{P},plan) where {N,Td,V,U,Tv,P}
-    Ypts = node |> root_elements
-    allocate_buffer!(node,P)
-    for (I,rec) in active_cone_idxs_and_domains(node)
-        s          = cheb2nodes_iter(P,rec) # cheb points in parameter space
-        x          = map(si->interp2cart(si,node),s) |> vec |> collect # cheb points in physical space
-        irange = 1:length(x)
-        jrange = index_range(node)
-        vals       = getbuffer(node,I,P)
-        if isleaf(node)
-            @timeit_debug "leaf interpolants by direct sum" begin
-                # leaf nodes compute their own interp vals
-                near_interaction!(vals,K,x,Ypts,B,irange,jrange)
-                for i in eachindex(x)
-                    xi = x[i] # cartesian coordinate of node
-                    vals[i] /= centered_factor(K,xi,node)
+    isleaf(node) && return _construct_chebyshev_interpolants_leaf!(node,K,B,p,plan)
+    X     = node.data.ipts
+    ivals = node.data.ivals
+    fill!(ivals,zero(eltype(ivals)))
+    @timeit_debug "interpolant transfered from children" begin
+        for chd in children(node)
+            length(chd) == 0 && continue
+            for (I,data) in conedata(chd)
+                coefs   = getbuffer(chd,I)
+                idxs   = data.paridxs
+                rec    = cone_domains(chd)[I]
+                for i in idxs
+                    si        = cart2interp(X[i],chd)
+                    ivals[i]  += chebeval(coefs,si,rec,p) * transfer_factor(K,X[i],chd)
                 end
             end
-        else
-            @timeit_debug "interpolant transfered from children" begin
-                for chd in children(node)
-                    length(chd) == 0 && continue
-                    for i in eachindex(x)
-                        idxcone   = cone_index(x[i], chd)
-                        si        = cart2interp(x[i],chd)
-                        # transfer block's interpolant to parent's interpolants
-                        rec  = cone_domains(chd)[idxcone]
-                        coefs = getbuffer(chd,idxcone,P)
-                        vals[i] += chebeval(coefs,si,rec,p) * transfer_factor(K,x[i],chd)
-                    end
-                end
-            end
-        end
-        @timeit_debug "compute cheb coeffs" begin
-            coefs = chebcoefs!(reshape(vals,P...),plan)
         end
     end
-    # interps on children no longer needed
-    for chd in children(node)
-        free_buffer!(chd)
+    # transform from vals to cheb coefficients
+    @timeit_debug "compute cheb coeffs" begin
+        L = prod(P)
+        kmax = length(ivals)/L |> Int
+        # TODO: it should be possible to do a batch fft instead of several
+        # individual ones.
+        for k in 1:kmax
+            vals = @views ivals[(k-1)*L+1:k*L]
+            chebcoefs!(reshape(vals,P...),plan)
+        end
+    end
+    return node
+end
+
+function _construct_chebyshev_interpolants_leaf!(node::SourceTree{N,Td,V,U,Tv},K,B,p::Val{P},plan) where {N,Td,V,U,Tv,P}
+    Ypts = node |> root_elements
+    X    = node.data.ipts
+    out  = node.data.ivals
+    fill!(out,zero(eltype(out)))
+    idxs = 1:length(X)
+    jrange = index_range(node)
+    @timeit_debug "leaf interpolants by direct sum" begin
+        # leaf nodes compute their own interp vals
+        near_interaction!(out,K,X,Ypts,B,idxs,jrange)
+        for i in idxs
+            xi = X[i] # cartesian coordinate of node
+            out[i] /= centered_factor(K,xi,node)
+        end
+    end
+    # transform from vals to cheb coefficients
+    @timeit_debug "compute cheb coeffs" begin
+        L = prod(P)
+        kmax = length(out)/L |> Int
+        # TODO: it should be possible to do a batch fft instead of several
+        # individual ones.
+        for k in 1:kmax
+            vals = @views out[(k-1)*L+1:k*L]
+            chebcoefs!(reshape(vals,P...),plan)
+        end
     end
     return node
 end
@@ -256,14 +271,15 @@ end
 # allows for vectorization of the cheb poly evaluation
 function _compute_far_interaction!(C,K,target_tree,node,p::Val{P}) where {P}
     Xpts  = target_tree |> root_elements
-    for (I,idxs) in node.data.faridxs
+    # for (I,idxs) in node.data.faridxs
+    for (I,data) in conedata(node)
+        idxs    = data.faridxs
         rec     = cone_domains(node)[I]
-        coefs   = getbuffer(node,I,P)
+        coefs   = getbuffer(node,I)
         for i in idxs
             s    = cart2interp(coords(Xpts[i]),node)
             C[i]  += chebeval(coefs,s,rec,p) * centered_factor(K,Xpts[i],node)
         end
-
     end
     # for far_target in far_list(node)
     #     for i in index_range(far_target)

@@ -72,6 +72,59 @@ end
     return evaluate(x0, coefs, Val{N}(), 1, length(coefs),sz)
 end
 
+function chebeval1d(coefs,x,p::Val{SZ}) where {SZ}
+    n = SZ[1]
+    P = SZ[2]
+    kmax  = length(coefs) ÷ P
+    out   = Vector{eltype(coefs)}(undef,kmax)
+    chebeval1d!(out,coefs,x,p)
+end
+
+function chebeval1dvec(coefs,x,p::Val{SZ}) where {SZ}
+    n = SZ[1]
+    P = SZ[2]
+    out   = Vector{eltype(coefs)}(undef,n)
+    chebeval1dvec!(out,coefs,x,p)
+end
+
+using SIMD
+
+function chebeval1dvec!(out,coefs,x,::Val{SZ}) where {SZ}
+    # does a vectorized chebeval for `n` sets of cheb coefficients of length `P`
+    # each. The coefs is supposed to be an `n × P` matrix.
+    n = SZ[1]
+    P = SZ[2]
+    VECSIZE   = 4
+    lane = VecRange{VECSIZE}(0)
+    for k in 1:VECSIZE:n
+        i1    = k + lane
+        bₖ    = muladd(2x, coefs[i1+(P-1)*n], coefs[i1+(P-2)*n])
+        bₖ₊₁  = oftype(bₖ, coefs[i1+(P-1)*n])
+        for j = P-2:-1:2
+            bⱼ = muladd(2x, bₖ, coefs[i1+(j-1)*n]) - bₖ₊₁
+            bₖ, bₖ₊₁ = bⱼ, bₖ
+        end
+        out[k+lane] = muladd(x, bₖ, coefs[i1]) - bₖ₊₁
+    end
+    return out
+end
+
+function chebeval1d!(out,coefs,x,::Val{SZ}) where {SZ}
+    n = SZ[1]
+    P = SZ[2]
+    for k in 1:n
+        i1    = (k-1)*P+1
+        bₖ    = muladd(2x, coefs[i1+P-1], coefs[i1+P-2])
+        bₖ₊₁  = oftype(bₖ, coefs[i1+P-1])
+        for j = P-2:-1:2
+            bⱼ = muladd(2x, bₖ, coefs[i1-1+j]) - bₖ₊₁
+            bₖ, bₖ₊₁ = bⱼ, bₖ
+        end
+        out[k] = muladd(x, bₖ, coefs[i1]) - bₖ₊₁
+    end
+    return out
+end
+
 @fastmath function evaluate(x::SVector{N}, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {N,dim,SZ}
     n = SZ[dim]
     @inbounds xd = x[dim]
