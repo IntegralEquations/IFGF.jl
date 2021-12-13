@@ -1,4 +1,4 @@
-const TargetTree{N,Td,U} = ClusterTree{U,HyperRectangle{N,Td},Nothing}
+const TargetTree{N,Td} = ClusterTree{Vector{SVector{N,Td}},HyperRectangle{N,Td},Nothing}
 
 """
     initialize_target_tree(;points,splitter)
