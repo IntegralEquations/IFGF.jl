@@ -36,9 +36,20 @@ function _laplace3d_sl_fast!(C,X,Y,σ)
             # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-julia-8.html
             invd    = @fastmath Float64(1 / sqrt(Float32(d2)))
             invd = 1.5invd - 0.5d2 * invd * (invd * invd)
-            C[i] += inv(4π)*invd*σ[j]
+            C[i] += (!iszero(d2))*(inv(4π)*invd*σ[j])
             # C[i] += inv(4π*sqrt(d2))*σ[j] # significalty slower
         end
     end
     return C
+end
+
+function cube_uniform_surface_mesh(dx)
+    range = 0:dx:1
+    s1 = [SVector(0.,a,b) for a in range, b in range] |> vec
+    s2 = [SVector(1.,a,b) for a in range, b in range] |> vec
+    s3 = [SVector(a,0,b) for a in range, b in range]  |> vec
+    s4 = [SVector(a,1,b) for a in range, b in range]  |> vec
+    s5 = [SVector(a,b,0) for a in range, b in range]  |> vec
+    s6 = [SVector(a,b,1) for a in range, b in range]  |> vec
+    append!(s1,s2,s3,s4,s5,s6)
 end

@@ -12,40 +12,33 @@
 # summation" algorithm.
 # (c) implement an in-place `chebinterp!` and `chebcoeffs!` which will use the
 # array of values to store the chebyshev coefficiets
-# (d) memoize the chebnodes in 1d
-# (e) implement some product iterators for tensor product of cheb nodes
+# (d) statically compute the reference tensor-product chebnodes given the order
 
-const CHEB2NODES1D = Dict{Int,Vector{Float64}}()
-
-cheb2nodes(n::NTuple{N},lc::SVector{N},uc::SVector{N}) where {N} = map(x->SVector(x),cheb2nodes_iter(n,lc,uc))
-function cheb2nodes_iter(n::NTuple{N},lc::SVector{N},uc::SVector{N}) where {N}
-    nodes1d = ntuple(d->cheb2nodes(n[d],lc[d],uc[d]),N)
-    iter = Iterators.product(nodes1d...)
-    return iter
-end
-cheb2nodes_iter(n::NTuple,rec::HyperRectangle) = cheb2nodes(n,low_corner(rec),high_corner(rec))
-function cheb2nodes(n::Integer,a::Number,b::Number)
-    xcheb::Vector{Float64} = cheb2nodes(n)
-    c0 = (a+b)/2
-    c1 = (b-a)/2
-    return @. c0 + c1*xcheb
-end
 function cheb2nodes(n)
-    if !haskey(CHEB2NODES1D,n)
-        nodes = [cos((i-1)*π /(n-1)) for i in 1:n]
-        CHEB2NODES1D[n] = nodes
-    end
-    CHEB2NODES1D[n]
+    [cos((i-1)*π /(n-1)) for i in 1:n]
 end
 
-function chebinterp!(vals::AbstractArray{<:Any,N}, lb::SVector{N}, ub::SVector{N},plan::FFTW.FFTWPlan) where {N}
-    Td    = promote_type(eltype(lb), eltype(ub))
-    coefs = chebcoefs!(vals,plan)
-    return ChebPoly{N,eltype(coefs),Td}(coefs, SVector{N,Td}(lb), SVector{N,Td}(ub))
+@generated function cheb2nodes(::Val{P}) where {P}
+    nodes1d = map(i->cheb2nodes(i),P)
+    iter    = Iterators.product(nodes1d...)
+    nodes   = SVector.(collect(iter))
+    snodes  = SArray{Tuple{P...}}(nodes)
+    return :($snodes)
+end
+
+function cheb2nodes(p::Val{P},rec::HyperRectangle) where {P}
+    refnodes = cheb2nodes(p)
+    lc,hc    = low_corner(rec), high_corner(rec)
+    c0       = (lc+hc)/2
+    c1       = (hc-lc)/2
+    map(x-> c0 + c1.*x,refnodes)
 end
 
 function chebcoefs!(vals::AbstractArray{<:Number,N},plan::FFTW.FFTWPlan) where {N}
-    coefs = FFTW.mul!(vals,plan,vals) # type-I DCT
+    # because vals may be a view with the wrong alignment, make a local copy of
+    # it to use the precomputed plan, then copy it back to vals at the end
+    coefs = copy(vals)
+    FFTW.mul!(coefs,plan,coefs) # type-I DCT
     # renormalize the result to obtain the conventional
     # Chebyshev-polnomial coefficients
     s = size(coefs)
@@ -58,13 +51,8 @@ function chebcoefs!(vals::AbstractArray{<:Number,N},plan::FFTW.FFTWPlan) where {
         I = CartesianIndices(ntuple(i -> i == dim ? (s[i]:s[i]) : 1:s[i],N))
         @views @. coefs[I] /= 2
     end
-    return coefs
-end
-
-@fastmath function chebeval(interp::ChebPoly,x::SVector{N,<:Real},sz::Val{SZ}) where {N,SZ}
-    x0 = @. (x - interp.lb) * 2 / (interp.ub - interp.lb) - 1
-    all(abs.(x0) .≤ 1 + 1e-8) || throw(ArgumentError("$x not in domain. lb = $(interp.lb), ub=$(interp.ub)"))
-    return evaluate(x0, interp.coefs, Val{N}(), 1, length(interp.coefs),sz)
+    copyto!(vals,coefs)
+    return vals
 end
 
 @fastmath function chebeval(coefs,x::SVector{N,<:Real},rec::HyperRectangle,sz::Val{SZ}) where {N,SZ}

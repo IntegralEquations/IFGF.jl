@@ -17,7 +17,11 @@ using IFGF
         B     = rand(ny)
         B_mat = rand(ny,nz)
         C     = zeros(nx)
-        A     = IFGFOperator(K,Ypts,Xpts;splitter,p,ds_func)
+        A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func)
+        mul!(C,A,B)
+        @test size(A) == (nx,ny)
+        @test C ≈ A_mat*B
+        A   = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func,lite=true)
         mul!(C,A,B)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
@@ -36,7 +40,11 @@ using IFGF
         B     = rand(ny)
         B_mat = rand(ny,nz)
         C     = zeros(nx)
-        A     = IFGFOperator(K,Ypts,Xpts;splitter,p,ds_func)
+        A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func)
+        mul!(C,A,B)
+        @test size(A) == (nx,ny)
+        @test C ≈ A_mat*B
+        A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func,lite=true)
         mul!(C,A,B)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
@@ -58,7 +66,11 @@ end
         B     = rand(ny)
         B_mat = rand(ny,nz)
         C     = zeros(nx)
-        A     = IFGFOperator(K,Ypts,Xpts;splitter,p,ds_func)
+        A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func)
+        mul!(C,A,B)
+        @test size(A) == (nx,ny)
+        @test C ≈ A_mat*B
+        A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func,lite=true)
         mul!(C,A,B)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
@@ -77,10 +89,16 @@ end
         B     = rand(ny)
         B_mat = rand(ny,nz)
         C     = zeros(nx)
-        A     = IFGFOperator(K,Ypts,Xpts;splitter,p,ds_func)
+        A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func)
         mul!(C,A,B)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
+        A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func,lite=true)
+        bytes = Base.summarysize(A)
+        mul!(C,A,B)
+        @test size(A) == (nx,ny)
+        @test C ≈ A_mat*B
+        @test bytes == Base.summarysize(A)
         # @test A*B_mat ≈ A_mat*B_mat
     end
 end
@@ -98,10 +116,17 @@ end
     B     = rand(ny)
     B_mat = rand(ny,nz)
     C     = zeros(nx)
-    A     = IFGFOperator(K,Ypts,Xpts;splitter,p,ds_func)
+    A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func)
     mul!(C,A,B)
     @test size(A) == (nx,ny)
     @test C ≈ A_mat*B
     @test C == mul!(C,A,B) # recompute to verify that the result does not change
+    A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func,lite=true)
+    bytes = Base.summarysize(A)
+    mul!(C,A,B)
+    @test size(A) == (nx,ny)
+    @test C ≈ A_mat*B
+    @test C == mul!(C,A,B) # recompute to verify that the result does not change
+    @test bytes == Base.summarysize(A)
     #@test A*B_mat ≈ A_mat*B_mat
 end

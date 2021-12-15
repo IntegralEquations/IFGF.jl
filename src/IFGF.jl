@@ -6,10 +6,8 @@ using LinearAlgebra
 using StaticArrays
 using TimerOutputs
 using Printf
-using RecipesBase
-import AbstractTrees
-using FastChebInterp
-using FastChebInterp: ChebPoly, FFTW
+using FFTW
+using LoopVectorization
 
 import LinearAlgebra: mul!
 
@@ -19,8 +17,6 @@ using WavePropBase.Geometry
 using WavePropBase.Mesh
 using WavePropBase.Interpolation
 using WavePropBase.Trees
-
-WavePropBase.@import_interface
 
 include("utils.jl")
 include("targettree.jl")
@@ -37,7 +33,7 @@ export
     GeometricSplitter,
     TargetTree,
     SourceTree,
-    IFGFOperator,
+    IFGFOp,
     # methods
     initialize_target_tree,
     initialize_source_tree,

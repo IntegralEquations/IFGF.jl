@@ -9,28 +9,27 @@ Random.seed!(1)
 
 includet(joinpath(IFGF.PROJECT_ROOT,"test","testutils.jl"))
 
-k    = 4π
+k    = 64π
 λ    = 2π/k
 ppw  = 8
 dx   = λ/ppw
 
-struct HelmholtzKernel
-    k::Float64
+struct LaplaceKernel
 end
 
-function (K::HelmholtzKernel)(x,y)
+function (K::LaplaceKernel)(x,y)
     d = norm(x-y)
-    v = exp(im*K.k*d)/(4*π*d)
+    v = 1/(4*π*d)
     return (!iszero(d))*v
 end
 
-function IFGF.near_interaction!(C,K::HelmholtzKernel,X,Y,σ,I,J)
+function IFGF.near_interaction!(C,K::LaplaceKernel,X,Y,σ,I,J)
     Xm = reshape(reinterpret(Float64,X),3,:)
     Ym = reshape(reinterpret(Float64,Y),3,:)
-    @views _helmholtz3d_sl_fast!(C[I],Xm[:,I],Ym[:,J],σ[J],K.k)
+    @views _laplace3d_sl_fast!(C[I],Xm[:,I],Ym[:,J],σ[J])
 end
 
-const T = ComplexF64
+const T = Float64
 
 clear_entities!()
 geo = ParametricSurfaces.Sphere(;radius=1)
@@ -45,11 +44,11 @@ nx = length(Xpts)
 ny = length(Ypts)
 @info "" nx,ny
 
-K = HelmholtzKernel(k)
+K = LaplaceKernel()
 
 I   = rand(1:nx,20)
 B   = randn(T,ny)
-tfull = @elapsed exa = [sum(i == j ? 0*im : K( Xpts[i],Ypts[j])*B[j] for j in 1:ny) for i in I]
+tfull = @elapsed exa = [sum(i == j ? 0 : K( Xpts[i],Ypts[j])*B[j] for j in 1:ny) for i in I]
 @info "Estimated time for full product: $(tfull*nx/20)"
 
 # trees
@@ -57,21 +56,18 @@ splitter = CardinalitySplitter(;nmax=200)
 # splitter = DyadicSplitter(;nmax=200)
 
 # cone
-p = (3,5,5)
-ds_func = IFGF.cone_domain_size_func(k,(1.0,π/2,π/2))
-IFGFOp(K,Ypts,Xpts;splitter,p,ds_func,lite=true,threads=false)
-@hprofile A = IFGFOp(K,Ypts,Xpts;splitter,p,ds_func,lite=true,threads=false)
+p = (4,5,5)
+ds_func = IFGF.cone_domain_size_func(0,(1.0,π/2,π/2))
+tp = @elapsed A = IFGFOp(K,Ypts,Xpts;splitter,p,ds_func,lite=true,threads=true)
 # @hprofile A = IFGFOp(K,Ypts,Xpts;splitter,p,ds_func)
 C = zeros(T,nx)
 
-mul!(C,A,B,1,0;threads=false)
-@hprofile mul!(C,A,B,1,0;threads=false)
-er = norm(C[I]-exa,2) / norm(exa,2)
-@info "" er,nx
-@info Base.summarysize(A)/1e9
+# @hprofile mul!(C,A,B,1,0;threads=true)
+# er = norm(C[I]-exa,2) / norm(exa,2)
+# @info "" er,nx
+# @info Base.summarysize(A)/1e9
 ##
 
-# mul!(C,A,B,1,0;threads=true)
-# t = @elapsed mul!(C,A,B,1,0;threads=true)
-# er = norm(C[I]-exa,2) / norm(exa,2)
-# @info "" er,nx,t
+t = @elapsed mul!(C,A,B,1,0;threads=true)
+er = norm(C[I]-exa,2) / norm(exa,2)
+@info "" er,nx,tp,t
