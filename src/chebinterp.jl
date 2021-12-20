@@ -18,11 +18,18 @@ function cheb2nodes(n)
     [cos((i-1)*π /(n-1)) for i in 1:n]
 end
 
+function cheb2nodes(p::NTuple)
+    nodes1d = map(i->cheb2nodes(i),p)
+    iter    = Iterators.product(nodes1d...)
+    return iter
+end
+
 @generated function cheb2nodes(::Val{P}) where {P}
     nodes1d = map(i->cheb2nodes(i),P)
     iter    = Iterators.product(nodes1d...)
     nodes   = SVector.(collect(iter))
-    snodes  = SArray{Tuple{P...}}(nodes)
+    # snodes  = SArray{Tuple{P...}}(nodes)
+    snodes = nodes
     return :($snodes)
 end
 
@@ -34,8 +41,16 @@ function cheb2nodes(p::Val{P},rec::HyperRectangle) where {P}
     map(x-> c0 + c1.*x,refnodes)
 end
 
+function cheb2nodes(p::NTuple,rec::HyperRectangle)
+    refnodes = cheb2nodes(p)
+    lc,hc    = low_corner(rec), high_corner(rec)
+    c0       = (lc+hc)/2
+    c1       = (hc-lc)/2
+    map(x-> c0 + c1.*x,refnodes)
+end
+
 function chebcoefs!(vals::AbstractArray)
-    plan = FFTW.plan_r2r!(copy(vals),FFTW.REDFT00;flags=FFTW.PATIENT)
+    plan = FFTW.plan_r2r!(copy(vals),FFTW.REDFT00)
     chebcoefs!(vals,plan)
 end
 

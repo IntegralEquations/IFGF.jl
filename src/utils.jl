@@ -99,13 +99,14 @@ function _density_type_from_kernel_type(T)
     end
 end
 
-function cheb_error_estimate(coefs::Array{T,N}) where {T,N}
+function cheb_error_estimate(coefs::AbstractArray{T,N},dim) where {T,N}
     sz = size(coefs)
-    er = 0.0
-    for I in CartesianIndices(coefs)
-        any(Tuple(I) .== sz) || continue
-        c = coefs[I]
-        er = max(er,norm(c,2))
+    I  = ntuple(N) do d
+        if d == dim
+            sz[d]:sz[d]
+        else
+            1:sz[d]
+        end
     end
-    return er
+    norm(view(coefs,I...),2) / norm(coefs,2)
 end

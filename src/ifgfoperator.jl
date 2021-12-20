@@ -51,7 +51,7 @@ initialized (i.e. the interaction list and the cone list are computed).
              per dimension in interpolation coordinates. In 3D, `ds = (dss,dsθ,dsϕ)`.
              In 2D, `ds = (dss,dsθ)`.
 """
-function IFGFOp(kernel,Xpoints,Ypoints;splitter,p,ds_func,adm=modified_admissible_condition,lite=true,threads=true)
+function IFGFOp(kernel,Xpoints,Ypoints;splitter,ds_func,adm=modified_admissible_condition,lite=true,threads=true,tol=0,p=nothing)
     # infer the type of the matrix, then compute the type of density to be interpolated
     U,V = eltype(Xpoints), eltype(Ypoints)
     T = hasmethod(return_type,Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel,U,V)
@@ -65,6 +65,12 @@ function IFGFOp(kernel,Xpoints,Ypoints;splitter,p,ds_func,adm=modified_admissibl
         target_tree = initialize_target_tree(;Xpoints,splitter)
     end
     partition = Trees.partition_by_depth(source_tree)
+
+    if p === nothing
+        @assert tol > 0
+        p = estimate_interpolation_order(kernel,partition,ds_func,tol,(2,2,2))
+        @info p
+    end
     # intialize ifgf object
     ifgf = IFGFOp{T}(kernel, target_tree, source_tree, p, ds_func, partition)
     # update interaction lists
@@ -75,6 +81,60 @@ function IFGFOp(kernel,Xpoints,Ypoints;splitter,p,ds_func,adm=modified_admissibl
         compute_cone_list!(ifgf,threads)
     end
     return ifgf
+end
+
+function estimate_interpolation_order(kernel,partition,ds_func,tol,p)
+    nboxes = 20
+    # pick N random nodes at each deepest level and estimate the interpolation
+    # error by looking at the last chebyshev coefficients
+    # for nodes in partition
+    nodes = partition[end]
+    n  = length(nodes)
+    Δn = n ÷ nboxes
+    for i in 1:Δn:n
+        node = nodes[i]
+        er = Inf
+        while er > tol
+            N = ambient_dimension(node)
+            ds   = ds_func(node)
+            ers   = estimate_interpolation_error(kernel,node,ds,p)
+            er,imax = findmax(ers)
+            @debug ers,p
+            if er > tol
+                p = ntuple(N) do i
+                    i == imax ? p[i]+1 : p[i]
+                end
+            end
+        end
+    end
+    # end
+    return p
+end
+
+function estimate_interpolation_error(kernel,node::SourceTreeLite{N,T,V},ds,p) where {N,T,V}
+    # lb     = SVector(sqrt(eps()),0,-π)
+    lb     = SVector(sqrt(N)/(2N),0,-π)
+    ub     = SVector(sqrt(N)/N,π,π)
+    domain = HyperRectangle(lb,ub)
+    msh    = UniformCartesianMesh(domain; step = ds)
+    els    = ElementIterator(msh)
+    # pick a random cone
+    I      = CartesianIndex((1,1,1))
+    rec    = els[I]
+    s      = cheb2nodes(p,rec) # cheb points in parameter space
+    x      = map(si->interp2cart(si,node),s)
+    irange = 1:length(x)
+    vals   = zeros(V,p...)
+    Ypts   = root_elements(node)[node.index_range]
+    B      = 2*rand(V,length(Ypts)) .- 1
+    jrange = 1:length(B)
+    near_interaction!(vals,kernel,x,Ypts,B,irange,jrange)
+    for i in eachindex(x)
+        xi = x[i] # cartesian coordinate of node
+        vals[i] /= centered_factor(kernel,xi,node)
+    end
+    coefs = chebcoefs!(reshape(vals,p...))
+    ntuple(i->cheb_error_estimate(coefs,i),N)
 end
 
 """
@@ -387,6 +447,8 @@ function _moments_to_moments!(node::SourceTreeLite{N,Td,Tv},K,B,p::Val{P},plan) 
             end
         end
         coefs = chebcoefs!(reshape(vals,P...),plan)
+        # er    = cheb_error_estimate(coefs,1),cheb_error_estimate(coefs,2),cheb_error_estimate(coefs,3)
+        # @info er
     end
     # interps on children no longer needed
     for chd in children(node)
