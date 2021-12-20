@@ -8,6 +8,7 @@ using TimerOutputs
 using Printf
 using FFTW
 using LoopVectorization
+using SIMD
 
 import LinearAlgebra: mul!
 

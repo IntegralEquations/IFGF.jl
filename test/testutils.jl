@@ -19,7 +19,6 @@ function _helmholtz3d_sl_fast!(C,X,Y,σ,k)
             zi = inv(4π*d) * s
             C_r[i] += (!iszero(d))*(zr*σ_r[j] - zi*σ_i[j])
             C_i[i] += (!iszero(d))*(zi*σ_r[j] + zr*σ_i[j])
-
         end
     end
     return C
@@ -44,7 +43,7 @@ function _laplace3d_sl_fast!(C,X,Y,σ)
 end
 
 function cube_uniform_surface_mesh(dx)
-    range = 0:dx:1
+    range = dx/2:dx:1-dx/2
     s1 = [SVector(0.,a,b) for a in range, b in range] |> vec
     s2 = [SVector(1.,a,b) for a in range, b in range] |> vec
     s3 = [SVector(a,0,b) for a in range, b in range]  |> vec
@@ -52,4 +51,33 @@ function cube_uniform_surface_mesh(dx)
     s5 = [SVector(a,b,0) for a in range, b in range]  |> vec
     s6 = [SVector(a,b,1) for a in range, b in range]  |> vec
     append!(s1,s2,s3,s4,s5,s6)
+end
+
+function cube_uniform_volume_mesh(dx)
+    range = dx/2:dx:1-dx/2
+    [SVector(a,b,c) for a in range, b in range, c in range] |> vec
+end
+
+# By Matthieu Aussal
+function fibonacci(N,r)
+    # initialization
+    theta = zeros(N)
+    phi   = zeros(N)
+    or    = (1+sqrt(5))/2;
+
+    # Fibonnacci rules
+    for i = 1:N
+        n        = i-1;
+        theta[i] = mod( (2*pi/or) * n , 2*pi);
+        phi[i]   = asin( -1 + 2/(N-1) * n);
+    end
+
+    # Carthesian coordinates
+    x = r .* cos.(theta) .* cos.(phi)
+    y = r .* sin.(theta) .* cos.(phi)
+    z = r .* sin.(phi)
+    X = [x y z];
+
+    # Output
+    return X
 end

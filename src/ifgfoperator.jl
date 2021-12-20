@@ -442,7 +442,6 @@ end
 
 function _moments_to_particles!(C,K,target_tree,node::SourceTree,p::Val{P}) where {P}
     Xpts  = target_tree |> root_elements
-    # for (I,idxs) in node.data.faridxs
     for (I,data) in conedatadict(node)
         idxs    = data.faridxs
         rec     = cone_domain(node,I)

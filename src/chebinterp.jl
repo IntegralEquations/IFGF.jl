@@ -34,6 +34,11 @@ function cheb2nodes(p::Val{P},rec::HyperRectangle) where {P}
     map(x-> c0 + c1.*x,refnodes)
 end
 
+function chebcoefs!(vals::AbstractArray)
+    plan = FFTW.plan_r2r!(copy(vals),FFTW.REDFT00;flags=FFTW.PATIENT)
+    chebcoefs!(vals,plan)
+end
+
 function chebcoefs!(vals::AbstractArray{<:Number,N},plan::FFTW.FFTWPlan) where {N}
     # because vals may be a view with the wrong alignment, make a local copy of
     # it to use the precomputed plan, then copy it back to vals at the end
@@ -75,42 +80,51 @@ function chebeval1dvec(coefs,x,p::Val{SZ}) where {SZ}
     chebeval1dvec!(out,coefs,x,p)
 end
 
-using SIMD
-
-function chebeval1dvec!(out,coefs,x,::Val{SZ}) where {SZ}
-    # does a vectorized chebeval for `n` sets of cheb coefficients of length `P`
-    # each. The coefs is supposed to be an `n × P` matrix.
-    n = SZ[1]
-    P = SZ[2]
-    VECSIZE   = 4
-    lane = VecRange{VECSIZE}(0)
-    for k in 1:VECSIZE:n
-        i1    = k + lane
-        bₖ    = muladd(2x, coefs[i1+(P-1)*n], coefs[i1+(P-2)*n])
-        bₖ₊₁  = oftype(bₖ, coefs[i1+(P-1)*n])
-        for j = P-2:-1:2
-            bⱼ = muladd(2x, bₖ, coefs[i1+(j-1)*n]) - bₖ₊₁
-            bₖ, bₖ₊₁ = bⱼ, bₖ
-        end
-        out[k+lane] = muladd(x, bₖ, coefs[i1]) - bₖ₊₁
+function chebeval1dlane(coefs,x,lane::VecRange)
+    # does a one dimensional chebeval of coefs[I,:] at coordinate x, returning a
+    # Vec object
+    # _,P = size(coefs)
+    P = 100
+    bₖ    = muladd(2x, coefs[lane,P], coefs[lane,P-1])
+    bₖ₊₁  = oftype(bₖ, coefs[lane,P])
+    for j = P-2:-1:2
+        bⱼ = @inbounds muladd(2x, bₖ, coefs[lane,j]) - bₖ₊₁
+        bₖ, bₖ₊₁ = bⱼ, bₖ
     end
-    return out
+    muladd(x, bₖ, coefs[lane,1]) - bₖ₊₁
 end
 
-function chebeval1d!(out,coefs,x,::Val{SZ}) where {SZ}
-    n = SZ[1]
-    P = SZ[2]
-    for k in 1:n
-        i1    = (k-1)*P+1
-        bₖ    = muladd(2x, coefs[i1+P-1], coefs[i1+P-2])
-        bₖ₊₁  = oftype(bₖ, coefs[i1+P-1])
-        for j = P-2:-1:2
-            bⱼ = muladd(2x, bₖ, coefs[i1-1+j]) - bₖ₊₁
-            bₖ, bₖ₊₁ = bⱼ, bₖ
-        end
-        out[k] = muladd(x, bₖ, coefs[i1]) - bₖ₊₁
+@inline function chebeval1dvec(coefs::Vec{N,T},x::Number,bₖ::T=zero(T),bₖ₊₁::T=zero(T)) where {N,T}
+    for k = N:-1:1
+        bⱼ = muladd(2x, bₖ, coefs[k]) - bₖ₊₁
+        bₖ, bₖ₊₁ = bⱼ, bₖ
     end
-    return out
+    return bₖ,bₖ₊₁
+end
+
+function chebeval2d(coefs::Matrix{T},x::Number,y::Number) where {T}
+    L = 32
+    m,n = size(coefs)
+    # compute the last two coefficients to initialize bₖ and bₖ₊₁
+    I   = VecRange{L}(m-L+1)
+    C   = chebeval1dlane(coefs,y,I)
+    # bₖ    = muladd(2x, C[L], C[L-1])
+    # bₖ₊₁  = oftype(bₖ, C[L])
+    bₖ    = zero(T)
+    bₖ₊₁  = zero(T)
+    # bₖ,bₖ₊₁ = chebeval1dvec(C,x,bₖ,bₖ₊₁)
+    # # compute next four coefs
+    # I   -= L
+    # C   = chebeval1dlane(coefs,y,I)
+    # bₖ,bₖ₊₁ = chebeval1dvec(C,x,bₖ,bₖ₊₁)
+    # final pass
+    # I   -= L
+    # C   = chebeval1dlane(coefs,y,I)
+    for j = L:-1:2
+        bⱼ = muladd(2x, bₖ, C[j]) - bₖ₊₁
+        bₖ, bₖ₊₁ = bⱼ, bₖ
+    end
+    muladd(x, bₖ, C[1]) - bₖ₊₁
 end
 
 @fastmath function evaluate(x::SVector{N}, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {N,dim,SZ}
@@ -154,5 +168,3 @@ end
         return muladd(xd, bₖ, c₁) - bₖ₊₁
     end
 end
-
-ChebPoly(rec::HyperRectangle,vals::Array) = ChebPoly(vals,low_corner(rec),high_corner(rec))
