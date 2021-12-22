@@ -19,19 +19,6 @@ macro hprofile(block)
     end
 end
 
-# double invsqrtQuake( double number )
-#   {
-#       double y = number;
-#       double x2 = y * 0.5;
-#       std::int64_t i = *(std::int64_t *) &y;
-#       // The magic number is for doubles is from https://cs.uwaterloo.ca/~m32rober/rsqrt.pdf
-#       i = 0x5fe6eb50c7b537a9 - (i >> 1);
-#       y = *(double *) &i;
-#       y = y * (1.5 - (x2 * y * y));   // 1st iteration
-#       //      y  = y * ( 1.5 - ( x2 * y * y ) );   // 2nd iteration, this can be removed
-#       return y;
-#   }
-
 # fast invsqrt code taken from here
 # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-julia-8.html
 @inline function invsqrt(x::Float64)
@@ -67,12 +54,12 @@ end
 """
     modified_admissible_condition(target,source,[η])
 
-A target and source are admissible under the *modified admissible condition*
+A target and source are admissible under the *modified admissiblility condition*
 (MAC) if the target box lies farther than `r*η` away, where `r` is the radius of
 the source box and `η >= 1` is an adjustable parameter. By default, `η = N /
 √N`, where `N` is the ambient dimension.
 """
-function modified_admissible_condition(target,source,η)
+function modified_admissibility_condition(target,source,η)
     # compute distance between source center and target box
     xc = source |> container |> center
     h  = source |> container |> radius
@@ -82,12 +69,20 @@ function modified_admissible_condition(target,source,η)
     return dc > η*h
 end
 
-function modified_admissible_condition(target,source)
+function modified_admissibility_condition(target,source)
     N = ambient_dimension(target)
     η = N / sqrt(N)
-    modified_admissible_condition(target,source,η)
+    modified_admissibility_condition(target,source,η)
 end
 
+"""
+    _density_type_from_kernel_type(T)
+
+Helper function to compute the expected density `V` type associated with a kernel type
+`T`. For `T<:Number`, simply return `T`. For `T<:SMatrix`, return an `SVector`
+with elements of the type `eltype(T)` and of length `size(T,2)` so that
+multiplying an element of type `T` with an element of type `V` makes sense.
+"""
 function _density_type_from_kernel_type(T)
     if T <: Number
         return T
@@ -99,6 +94,12 @@ function _density_type_from_kernel_type(T)
     end
 end
 
+"""
+    cheb_error_estimate(coefs::AbstractArray{T,N},dim)
+
+Given an `N` dimensional array of coeffients , estimate the relative error
+commited by the Chebyshev interpolant along dimension `dim`.
+"""
 function cheb_error_estimate(coefs::AbstractArray{T,N},dim) where {T,N}
     sz = size(coefs)
     I  = ntuple(N) do d

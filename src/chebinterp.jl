@@ -14,6 +14,28 @@
 # array of values to store the chebyshev coefficiets
 # (d) statically compute the reference tensor-product chebnodes given the order
 
+"""
+    cheb2nodes(n,[domain])
+    cheb2nodes(p::NTuple,[domain])
+    cheb2nodes(::Val{P},[domain])
+
+Return the `n` Chebyshev nodes of the second kind on the interval `[-1,1]`.
+
+If passed a tuple `p`, return the tensor product of one-dimensinal nodes of size
+`p`.
+
+If passed a `Val{P}`, statically compute the tensor product nodes.
+
+Finally, passing a `domain::HyperRectangle` shifts the interpolation nodes to
+it.
+
+```julia
+lb = (0.,0.)
+ub = (3.,2.)
+domain = HyperRectangle(lb,ub)
+cheb2nodes((10,5),domain) # generate `10×5` Chebyshev nodes on the `[0,3]×[0,2]` rectangle.
+```
+"""
 function cheb2nodes(n)
     [cos((i-1)*π /(n-1)) for i in 1:n]
 end
@@ -55,23 +77,19 @@ function chebcoefs!(vals::AbstractArray)
 end
 
 function chebcoefs!(vals::AbstractArray{<:Number,N},plan::FFTW.FFTWPlan) where {N}
-    # because vals may be a view with the wrong alignment, make a local copy of
-    # it to use the precomputed plan, then copy it back to vals at the end
-    coefs = copy(vals)
-    FFTW.mul!(coefs,plan,coefs) # type-I DCT
+    FFTW.mul!(vals,plan,vals) # type-I DCT
     # renormalize the result to obtain the conventional
     # Chebyshev-polnomial coefficients
-    s = size(coefs)
+    s = size(vals)
     # coefs ./= prod(n -> 2(n-1), s)
     scale = 2^N/prod(n -> 2(n-1), s)
-    @. coefs *= scale
+    @. vals *= scale
     for dim = 1:N
         I = CartesianIndices(ntuple(i -> i == dim ? (1:1) : (1:s[i]),N))
-        @views @. coefs[I] /= 2
+        @views @. vals[I] /= 2
         I = CartesianIndices(ntuple(i -> i == dim ? (s[i]:s[i]) : 1:s[i],N))
-        @views @. coefs[I] /= 2
+        @views @. vals[I] /= 2
     end
-    copyto!(vals,coefs)
     return vals
 end
 
@@ -80,73 +98,11 @@ end
     return evaluate(x0, coefs, Val{N}(), 1, length(coefs),sz)
 end
 
-function chebeval1d(coefs,x,p::Val{SZ}) where {SZ}
-    n = SZ[1]
-    P = SZ[2]
-    kmax  = length(coefs) ÷ P
-    out   = Vector{eltype(coefs)}(undef,kmax)
-    chebeval1d!(out,coefs,x,p)
-end
-
-function chebeval1dvec(coefs,x,p::Val{SZ}) where {SZ}
-    n = SZ[1]
-    P = SZ[2]
-    out   = Vector{eltype(coefs)}(undef,n)
-    chebeval1dvec!(out,coefs,x,p)
-end
-
-function chebeval1dlane(coefs,x,lane::VecRange)
-    # does a one dimensional chebeval of coefs[I,:] at coordinate x, returning a
-    # Vec object
-    # _,P = size(coefs)
-    P = 100
-    bₖ    = muladd(2x, coefs[lane,P], coefs[lane,P-1])
-    bₖ₊₁  = oftype(bₖ, coefs[lane,P])
-    for j = P-2:-1:2
-        bⱼ = @inbounds muladd(2x, bₖ, coefs[lane,j]) - bₖ₊₁
-        bₖ, bₖ₊₁ = bⱼ, bₖ
-    end
-    muladd(x, bₖ, coefs[lane,1]) - bₖ₊₁
-end
-
-@inline function chebeval1dvec(coefs::Vec{N,T},x::Number,bₖ::T=zero(T),bₖ₊₁::T=zero(T)) where {N,T}
-    for k = N:-1:1
-        bⱼ = muladd(2x, bₖ, coefs[k]) - bₖ₊₁
-        bₖ, bₖ₊₁ = bⱼ, bₖ
-    end
-    return bₖ,bₖ₊₁
-end
-
-function chebeval2d(coefs::Matrix{T},x::Number,y::Number) where {T}
-    L = 32
-    m,n = size(coefs)
-    # compute the last two coefficients to initialize bₖ and bₖ₊₁
-    I   = VecRange{L}(m-L+1)
-    C   = chebeval1dlane(coefs,y,I)
-    # bₖ    = muladd(2x, C[L], C[L-1])
-    # bₖ₊₁  = oftype(bₖ, C[L])
-    bₖ    = zero(T)
-    bₖ₊₁  = zero(T)
-    # bₖ,bₖ₊₁ = chebeval1dvec(C,x,bₖ,bₖ₊₁)
-    # # compute next four coefs
-    # I   -= L
-    # C   = chebeval1dlane(coefs,y,I)
-    # bₖ,bₖ₊₁ = chebeval1dvec(C,x,bₖ,bₖ₊₁)
-    # final pass
-    # I   -= L
-    # C   = chebeval1dlane(coefs,y,I)
-    for j = L:-1:2
-        bⱼ = muladd(2x, bₖ, C[j]) - bₖ₊₁
-        bₖ, bₖ₊₁ = bⱼ, bₖ
-    end
-    muladd(x, bₖ, C[1]) - bₖ₊₁
-end
-
 @fastmath function evaluate(x::SVector{N}, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {N,dim,SZ}
-    n = SZ[dim]
+    @inbounds n = SZ[dim]
     @inbounds xd = x[dim]
     if dim == 1
-        c₁ = c[i1]
+        @inbounds c₁ = c[i1]
         if n ≤ 2
             n == 1 && return c₁ + one(xd) * zero(c₁)
             return muladd(xd, c[i1+1], c₁)

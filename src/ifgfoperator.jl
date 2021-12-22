@@ -1,16 +1,30 @@
 """
     struct IFGFOp{T} <: AbstractMatrix{T}
+
+High-level structure representing a linear operator with elements of type `T`
+with entry `i,j` given by `K(X[i],Y[j])`, where `K` is the underlying kernel
+function, and `X` and `Y` are the elements of the `target_tree` and
+`source_tree`, respectively.
+
+# Fields:
+- `kernel` : underlying kernel function
+- `target_tree` : tree structure used for clustering the target points
+- `source_tree` : tree structure used for clustering the source points
+- `p::NTuple`: number of chebyshev poins per dimension used in the interpolation
+  of far interactions
+- `ds_func` : function used to compute and appropriate mesh size in parameter
+  space. See e.g. [`cone_domain_size_func`](@ref)
+- `_source_tree_depth_partition` : vector with `i`-th entry containing all nodes
+  of the of depth `i-1`, where the root is given a depth of `0`.
 """
 struct IFGFOp{T} <: AbstractMatrix{T}
     kernel
     target_tree::TargetTree
-    source_tree::Union{SourceTree,SourceTreeLite}
+    source_tree::SourceTree
     p::NTuple
     ds_func::Function
     _source_tree_depth_partition
 end
-
-islite(ifgf::IFGFOp) = source_tree(ifgf) isa SourceTreeLite
 
 # getters
 rowrange(ifgf::IFGFOp)        = Trees.index_range(ifgf.target_tree)
@@ -18,7 +32,7 @@ colrange(ifgf::IFGFOp)        = Trees.index_range(ifgf.source_tree)
 kernel(op::IFGFOp)            = op.kernel
 target_tree(op::IFGFOp)       = op.target_tree
 source_tree(op::IFGFOp)       = op.source_tree
-polynomials_order(op::IFGFOp) = op.p
+polynomial_order(op::IFGFOp) = op.p
 meshsize_func(op::IFGFOp)     = op.ds_func
 
 function Base.size(op::IFGFOp)
@@ -29,47 +43,50 @@ end
 
 # disable getindex
 function Base.getindex(::IFGFOp,args...)
-    error()
+    error("`getindex(::IFGFOp,args...)` has been intentionally disabled")
 end
 
 """
-    IFGFOperator(kernel,Ypoints,Xpoints;splitter,p,ds_func,lite=true,threads=true)
+    IFGFOperator(kernel,Ypoints,Xpoints;splitter,p=nothing,tol=0,ds_func,threads=true)
 
-Create the source and target tree-structures for clustering the source `Ypoints`
-and target `Xpoints` using the splitting strategy of `splitter`. Both trees are
-initialized (i.e. the interaction list and the cone list are computed).
+Construct a linear operator reprensenting the action of `kernel` on each of
+`Xpoints` and `Ypoints`.
 
 # Arguments
 - `kernel`: kernel of the IFGF operator.
+- `Xpoints`: vector of target points.
 - `Ypoints`: vector of source points.
-- `Xpoints`: vector of observation points.
-- `splitter`: splitting strategy.
-- `p`: the number of interpolation points
-            per dimension in interpolation coordinates. In 3D, `p = (ns,nθ,nϕ)`.
-            In 2D, `p = (ns,nθ)`.
-- `ds_func`: function `ds_func(source_tree) = ds` that returns the size of the cone domains
-             per dimension in interpolation coordinates. In 3D, `ds = (dss,dsθ,dsϕ)`.
-             In 2D, `ds = (dss,dsθ)`.
+- `splitter`: splitting strategy (e.g. [`DyadicSplitter`](@ref) or [`CardinalitySplitter`](@ref)).
+- `p`: number of interpolation points per dimension in interpolation
+  coordinates. In 3D, `p = (ns,nθ,nϕ)`. In 2D, `p = (ns,nθ)`.
+- `tol`: desired relative tolerance of approximation. When `tol!=0`, a value of
+  `p` is estimated during the construction.
+- `ds_func`: function `ds_func(source_tree) = ds` that returns the size of the
+  cone domains per dimension in interpolation coordinates. In 3D, `ds =
+  (dss,dsθ,dsϕ)`. In 2D, `ds = (dss,dsθ)`.
 """
-function IFGFOp(kernel,Xpoints,Ypoints;splitter,ds_func,adm=modified_admissible_condition,lite=true,threads=true,tol=0,p=nothing)
-    # infer the type of the matrix, then compute the type of density to be interpolated
+function IFGFOp(kernel,Xpoints,Ypoints;splitter,ds_func,adm=modified_admissibility_condition,threads=true,tol=0,p=nothing)
+    # infer the type of the matrix, then compute the type of density to be
+    # interpolated
+    @assert !(isnothing(p) && tol > 0) "either `p` or `tol` must be passed as a keyword argument"
     U,V = eltype(Xpoints), eltype(Ypoints)
     T = hasmethod(return_type,Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel,U,V)
     assert_concrete_type(T)
     Tv = _density_type_from_kernel_type(T)
     # create source and target trees
     @timeit_debug "source tree initialization" begin
-        source_tree = initialize_source_tree(;Ypoints,splitter,Vdatatype=Tv,lite)
+        source_tree = initialize_source_tree(;Ypoints,splitter,Vdatatype=Tv)
     end
     @timeit_debug "target tree initialization" begin
         target_tree = initialize_target_tree(;Xpoints,splitter)
     end
     partition = Trees.partition_by_depth(source_tree)
-
+    # estimate interpolation order if needed
     if p === nothing
-        @assert tol > 0
-        p = estimate_interpolation_order(kernel,partition,ds_func,tol,(2,2,2))
-        @info p
+        @timeit_debug "estimate interpolation order" begin
+            p = estimate_interpolation_order(kernel,partition,ds_func,tol,(2,2,2))
+        end
+        @info "estimated interpolation order = $p"
     end
     # intialize ifgf object
     ifgf = IFGFOp{T}(kernel, target_tree, source_tree, p, ds_func, partition)
@@ -111,9 +128,9 @@ function estimate_interpolation_order(kernel,partition,ds_func,tol,p)
     return p
 end
 
-function estimate_interpolation_error(kernel,node::SourceTreeLite{N,T,V},ds,p) where {N,T,V}
-    # lb     = SVector(sqrt(eps()),0,-π)
-    lb     = SVector(sqrt(N)/(2N),0,-π)
+function estimate_interpolation_error(kernel,node::SourceTree{N,T,V},ds,p) where {N,T,V}
+    lb     = SVector(sqrt(eps()),0,-π)
+    # lb     = SVector(sqrt(N)/(2N),0,-π)
     ub     = SVector(sqrt(N)/N,π,π)
     domain = HyperRectangle(lb,ub)
     msh    = UniformCartesianMesh(domain; step = ds)
@@ -155,7 +172,7 @@ function compute_interaction_list!(ifgf::IFGFOp,adm)
     return ifgf
 end
 
-function _compute_interaction_list!(source::Union{SourceTree,SourceTreeLite}, target::TargetTree, adm)
+function _compute_interaction_list!(source::SourceTree, target::TargetTree, adm)
     # if either box is empty return immediately
     if length(source) == 0 || length(target) == 0
         return nothing
@@ -177,7 +194,7 @@ function _compute_interaction_list!(source::Union{SourceTree,SourceTreeLite}, ta
         end
     else
         # TODO: when both have children, how to recurse down? Two strategies
-        # below: recurse on largest one, or recurse on both.
+        # below:
         # strategy 1: recurse on children of largest box
         # if radius(source) > radius(target)
         #     for source_child in children(source)
@@ -188,7 +205,7 @@ function _compute_interaction_list!(source::Union{SourceTree,SourceTreeLite}, ta
         #         compute_interaction_list!(source, target_child, adm)
         #     end
         # end
-        # strategy 2: recurse on childre of both target and source
+        # strategy 2: recurse on children of both target and source
         for source_child in children(source)
             for target_child in children(target)
                 _compute_interaction_list!(source_child, target_child, adm)
@@ -207,7 +224,7 @@ parent's cones. The `polynomial_order(ifgf)` and `meshsize_func(ifgf)` are used
 to construct the appropriate interpolation domains and points.
 """
 function compute_cone_list!(ifgf::IFGFOp,threads)
-    p    = polynomials_order(ifgf)
+    p    = polynomial_order(ifgf)
     func = meshsize_func(ifgf)
     X    = target_tree(ifgf) |> root_elements
     partition = ifgf._source_tree_depth_partition
@@ -230,44 +247,8 @@ function _compute_cone_list!(partition,X,p,func,threads)
     return partition
 end
 
-function _initialize_cone_interpolants!(source::SourceTree, X, p::Val{P}, ds_func) where {P}
+function _initialize_cone_interpolants!(source::SourceTree{N}, X, p::Val{P}, ds_func) where {N,P}
     length(source) == 0 && (return source)
-    ds = ds_func(source)
-    # find minimal axis-aligned bounding box for interpolation points
-    domain,farpcoords,parpcoords = compute_interpolation_domain(source, p)
-    all(low_corner(domain) .< high_corner(domain)) || (return source)
-    _init_msh!(source, domain, ds)
-    # if not a root, also create all cones needed to cover interpolation points
-    # of parents
-    if !isroot(source)
-        source_parent = parent(source)
-        ipts = source_parent.data.ipts
-        for (i, s) in enumerate(parpcoords)
-            # idxcone, s = cone_index(x, source)
-            idxcone = element_index(s,msh(source))
-            _addnewcone!(source, idxcone, p)
-            _addidxtoparlist!(source, idxcone, i, s)
-        end
-    end
-    # initialize all cones needed to cover far field.
-    cc = 0
-    for far_target in farlist(source)
-        for i in index_range(far_target) # target points
-            cc += 1
-            # idxcone, s = cone_index(center(X[i]), source)
-            s = farpcoords[cc]
-            idxcone = element_index(s,msh(source))
-            _addnewcone!(source, idxcone, p)
-            _addidxtofarlist!(source, idxcone, i, s)
-        end
-    end
-    allocate_ivals!(source, p)
-    return source
-end
-
-function _initialize_cone_interpolants!(source::SourceTreeLite{N}, X, p::Val{P}, ds_func) where {N,P}
-    length(source) == 0 && (return source)
-    Iold = zero(CartesianIndex{N})
     ds = ds_func(source)
     # find minimal axis-aligned bounding box for interpolation points
     domain         = compute_interpolation_domain(source,p)
@@ -289,21 +270,17 @@ function _initialize_cone_interpolants!(source::SourceTreeLite{N}, X, p::Val{P},
                 # interpolation node in physical space
                 xi = interp2cart(si,source_parent)
                 # mesh index for interpolation point
-                Inew,_ = cone_index(xi,source)
-                Iold === Inew && continue
+                I,_ = cone_index(xi,source)
                 # initialize cone if needed
-                _addnewcone!(source,Inew,p)
-                Iold = Inew
+                _addnewcone!(source,I,p)
             end
         end
     end
     # initialize all cones needed to cover far field.
     for far_target in farlist(source)
         for x in Trees.elements(far_target) # target points
-            Inew,_ = cone_index(x,source)
-            Iold === Inew && continue
-            _addnewcone!(source,Inew,p)
-            Iold = Inew
+            I,_ = cone_index(x,source)
+            _addnewcone!(source,I,p)
         end
     end
     return source
@@ -356,12 +333,12 @@ function _gemv!(C,K,target_tree,partition,B,T,p::Val{P}) where {P}
                 @timeit_debug "M2M" _moments_to_moments!(node,K,B,p,plan)
             end
             @timeit_debug "M2P" _moments_to_particles!(C,K,target_tree,node,p)
-            @timeit_debug "P2P" _particles_particles!(C,K,target_tree,node,B,node)
+            @timeit_debug "P2P" _particles_to_particles!(C,K,target_tree,node,B,node)
         end
     end
     # since root has not parent, it must free its own ivals
     root = partition |> first |> first
-    free_ivals!(root)
+    free_interpolant_data!(root)
 end
 
 function _gemv_threaded!(C,K,target_tree,partition,B,T,p::Val{P}) where {P}
@@ -383,7 +360,7 @@ function _gemv_threaded!(C,K,target_tree,partition,B,T,p::Val{P}) where {P}
                 _moments_to_moments!(node,K,B,p,plan)
             end
             _moments_to_particles!(Cthreads[id],K,target_tree,node,p)
-            _particles_particles!(Cthreads[id],K,target_tree,node,B,node)
+            _particles_to_particles!(Cthreads[id],K,target_tree,node,B,node)
         end
     end
     # reduction stage
@@ -392,159 +369,72 @@ function _gemv_threaded!(C,K,target_tree,partition,B,T,p::Val{P}) where {P}
     end
     # since root has not parent, it must free its own ivals
     root = partition |> first |> first
-    free_ivals!(root)
+    free_interpolant_data!(root)
 end
 
 function _moments_to_moments!(node::SourceTree{N,Td,Tv},K,B,p::Val{P},plan) where {N,Td,Tv,P}
-    isleaf(node) && return _particle_to_moments!(node,K,B,p,plan)
-    X     = node.data.ipts
-    ivals = node.data.ivals
-    fill!(ivals,zero(eltype(ivals)))
-    for chd in children(node)
-        length(chd) == 0 && continue
-        for (I,data) in conedatadict(chd)
-            coefs     = getivals(chd,I)
-            pcoords   = parpcoords(chd,I)
-            idxs   = data.paridxs
-            rec    = cone_domain(chd,I)
-            for (n,i) in enumerate(idxs)
-                si = pcoords[n]
-                ivals[i]  += chebeval(coefs,si,rec,p) * transfer_factor(K,X[i],chd)
-            end
-        end
-    end
-    # transform from vals to cheb coefficients
-    L = prod(P)
-    kmax = length(ivals)/L |> Int
-    # TODO: it should be possible to do a batch fft instead of several
-    # individual ones.
-    for k in 1:kmax
-        vals = @views ivals[(k-1)*L+1:k*L]
-        chebcoefs!(reshape(vals,P...),plan)
-    end
-    return node
-end
-
-function _moments_to_moments!(node::SourceTreeLite{N,Td,Tv},K,B,p::Val{P},plan) where {N,Td,Tv,P}
-    allocate_ivals!(node,p)
+    allocate_interpolant_data!(node,p)
     for I in active_cone_idxs(node)
         rec = cone_domain(node,I)
         s          = cheb2nodes(p,rec) # cheb points in parameter space
         x          = map(si->interp2cart(si,node),s) # cheb points in physical space
-        vals       = getivals(node,I)
+        vals       = conedata(node,I)
         for chd in children(node)
             length(chd) == 0 && continue
-            idxold = zero(CartesianIndex{N})
             for i in eachindex(x)
-                idxnew,si   = cone_index(x[i], chd)
-                if idxnew !== idxold # => switch interpolant
-                    # transfer block's interpolant to parent's interpolants
-                    rec   = cone_domains(chd)[idxnew]
-                    coefs = getivals(chd,idxnew)
-                    idxold = idxnew
-                end
+                idxcone,si   = cone_index(x[i], chd)
+                # transfer block's interpolant to parent's interpolants
+                rec   = cone_domains(chd)[idxcone]
+                coefs = conedata(chd,idxcone)
                 vals[i] += chebeval(coefs,si,rec,p) * transfer_factor(K,x[i],chd)
             end
         end
+        # transform vals to coefs in place. Coefs will be used later when the
+        # current node transfers its expansion to its parent
         coefs = chebcoefs!(reshape(vals,P...),plan)
-        # er    = cheb_error_estimate(coefs,1),cheb_error_estimate(coefs,2),cheb_error_estimate(coefs,3)
-        # @info er
     end
     # interps on children no longer needed
     for chd in children(node)
-        free_ivals!(chd)
+        free_interpolant_data!(chd)
     end
     return node
 end
 
 function _particle_to_moments!(node::SourceTree{N,Td,Tv},K,B,p::Val{P},plan) where {N,Td,Tv,P}
     Ypts = node |> root_elements
-    X    = node.data.ipts
-    out  = node.data.ivals
-    fill!(out,zero(eltype(out)))
-    idxs = 1:length(X)
-    jrange = index_range(node)
-    # leaf nodes compute their own interp vals
-    near_interaction!(out,K,X,Ypts,B,idxs,jrange)
-    for i in idxs
-        xi = X[i] # cartesian coordinate of node
-        out[i] /= centered_factor(K,xi,node)
-    end
-    # transform from vals to cheb coefficients
-    L = prod(P)
-    kmax = length(out)/L |> Int
-    # TODO: it should be possible to do a batch fft instead of several
-    # individual ones.
-    for k in 1:kmax
-        vals = @views out[(k-1)*L+1:k*L]
-        chebcoefs!(reshape(vals,P...),plan)
-    end
-    return node
-end
-
-function _particle_to_moments!(node::SourceTreeLite{N,Td,Tv},K,B,p::Val{P},plan) where {N,Td,Tv,P}
-    Ypts = node |> root_elements
-    allocate_ivals!(node,p)
+    allocate_interpolant_data!(node,p)
     for I in active_cone_idxs(node)
         rec = cone_domain(node,I)
         s          = cheb2nodes(p,rec) # cheb points in parameter space
         x          = map(si->interp2cart(si,node),s)
         irange = 1:length(x)
         jrange = index_range(node)
-        vals       = getivals(node,I)
+        vals       = conedata(node,I)
         near_interaction!(vals,K,x,Ypts,B,irange,jrange)
         for i in eachindex(x)
             xi = x[i] # cartesian coordinate of node
             vals[i] /= centered_factor(K,xi,node)
         end
-        coefs = chebcoefs!(reshape(vals,P...),plan)
+        coefs = chebcoefs!(vals,plan)
     end
     return node
 end
 
-function _moments_to_particles!(C,K,target_tree,node::SourceTree,p::Val{P}) where {P}
-    Xpts  = target_tree |> root_elements
-    for (I,data) in conedatadict(node)
-        idxs    = data.faridxs
-        rec     = cone_domain(node,I)
-        coefs   = getivals(node,I)
-        pcoords = farpcoords(node,I)
-        for (n,i) in enumerate(idxs)
-            s = pcoords[n]
-            C[i]  += chebeval(coefs,s,rec,p) * centered_factor(K,Xpts[i],node)
-        end
-    end
-    return nothing
-end
-
-function _moments_to_particles!(C,K,target_tree,node::SourceTreeLite{N,T},p::Val{P}) where {N,T,P}
+function _moments_to_particles!(C,K,target_tree,node::SourceTree{N,T},p::Val{P}) where {N,T,P}
     Xpts   = target_tree |> root_elements
-    ivals  = node.data.ivals
-    isempty(ivals) && (return nothing)
-    # initialize some variables outside the for loop that will be used to
-    # determine if we should switch interpolant or not. This is a performance
-    # optimization since most of the time consecutive poins in the far field
-    # will be in the same cone interpolant.
-    Iold   = zero(CartesianIndex{N})
-    rec    = HyperRectangle{N,T}(ntuple(i->0,N),ntuple(i->0,N))
-    coefs  = @view ivals[1:1]
     for far_target in farlist(node)
         for i in index_range(far_target)
             x         = Xpts[i]
-            Inew,s    = cone_index(coords(x),node)
-            if Inew !== Iold
-                idxrange      = coneidxrange(node,Inew)
-                rec           = cone_domain(node,Inew)
-                coefs  = @view ivals[idxrange]
-                Iold          = Inew
-            end
+            I,s      = cone_index(coords(x),node)
+            rec      = cone_domain(node,I)
+            coefs    = conedata(node,I)
             C[i]  += chebeval(coefs,s,rec,p) * centered_factor(K,Xpts[i],node)
         end
     end
     return nothing
 end
 
-function _particles_particles!(C,K,target_tree,source_tree,B,node)
+function _particles_to_particles!(C,K,target_tree,source_tree,B,node)
     Xpts = target_tree |> root_elements
     Ypts = source_tree |> root_elements
     for neartarget in nearlist(node)
@@ -559,7 +449,10 @@ end
 """
     near_interaction!(C,K,X,Y,σ,I,J)
 
-Compute `C[i] <-- C[i] + ∑ⱼ K(X[i],Y[j])*σ[j]` for `i ∈ I`, `j ∈ J`.
+Compute `C[i] <-- C[i] + ∑ⱼ K(X[i],Y[j])*σ[j]` for `i ∈ I`, `j ∈ J`. The default
+implementation simply does a double loop over all `i ∈ I` and `j ∈ J`, but you
+override this method for the type of your own custom kernel `K` if you have a
+fast way of computing the full product in-place (e.g. using SIMD instructions).
 """
 function near_interaction!(C,K,X,Y,σ,I,J)
     for i in I
@@ -571,15 +464,27 @@ end
 
 
 # generic fallback. May need to be overloaded for specific kernels.
-function centered_factor(K,x,ysource::Union{SourceTree,SourceTreeLite})
-    yc = center(ysource)
+"""
+    centered_factor(K,x,Y::SourceTree)
+
+Scalar function used to help the interpolation of `I(x) = ∑ᵢ K(x,yᵢ)` where `yᵢ ∈ Y`
+and points `x` in the far field of `Y`. Defaults to `K(x,yc)` where `yc` is the
+center of `Y`.
+"""
+function centered_factor(K,x,Y::SourceTree)
+    yc = center(Y)
     return K(x,yc)
 end
 
 # generic fallback. May need to be overloaded for specific kernels.
-function transfer_factor(K,x,ysource::Union{SourceTree,SourceTreeLite})
-    yparent = parent(ysource)
-    return centered_factor(K,x,ysource)/centered_factor(K,x,yparent)
+"""
+    transfer_factor(K,x,Y::SourceTree)
+
+Ratio between the centered factor of `Y` and the centered factor of its parent.
+"""
+function transfer_factor(K,x,Y::SourceTree)
+    yparent = parent(Y)
+    return centered_factor(K,x,Y)/centered_factor(K,x,yparent)
 end
 
 function Base.show(io::IO,ifgf::IFGFOp)

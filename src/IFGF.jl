@@ -7,8 +7,6 @@ using StaticArrays
 using TimerOutputs
 using Printf
 using FFTW
-using LoopVectorization
-using SIMD
 
 import LinearAlgebra: mul!
 
@@ -26,25 +24,12 @@ include("chebinterp.jl")
 include("ifgfoperator.jl")
 
 export
+    # re-export some modules from WavePropBase
+    Geometry,
+    Trees,
+    Utils,
     # types
-    UniformCartesianMesh,
-    DyadicSplitter,
-    CardinalitySplitter,
-    GeometricMinimalSplitter,
-    GeometricSplitter,
-    TargetTree,
-    SourceTree,
     IFGFOp,
-    # methods
-    initialize_target_tree,
-    initialize_source_tree,
-    compute_interaction_list!,
-    compute_cone_list!,
-    clear_interpolants!,
-    cone_domain_size_func,
     # macros
     @hprofile
-    # modules
-    Utils
-
 end
