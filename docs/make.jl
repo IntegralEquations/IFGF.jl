@@ -6,11 +6,11 @@ DocMeta.setdocmeta!(IFGF, :DocTestSetup, :(using IFGF); recursive=true)
 makedocs(;
     modules=[IFGF],
     authors="Luiz M. Faria <maltezfaria@gmail.com> and contributors",
-    repo="https://github.com/maltezfaria/IFGF.jl/blob/{commit}{path}#{line}",
+    repo="https://github.com/WaveProp/IFGF.jl/blob/{commit}{path}#{line}",
     sitename="IFGF.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://maltezfaria.github.io/IFGF.jl",
+        canonical="https://WaveProp.github.io/IFGF.jl",
         assets=String[],
     ),
     pages=[
@@ -19,5 +19,6 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/maltezfaria/IFGF.jl",
+    repo="github.com/WaveProp/IFGF.jl",
+    devbranch="main"
 )
