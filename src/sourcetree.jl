@@ -1,327 +1,252 @@
+"""
+    mutable struct SourceTreeData{N,T,V}
 
-mutable struct SourceTreeData{N,Td,U}
-    # mesh of cone interpolation domains
-    # it defines HyperRectangles coordinates in interpolation coordinates `s`
-    cone_interp_msh::UniformCartesianMesh{N,Td}
-    # active cone indices
-    active_cone_idxs::Set{CartesianIndex{N}}
-    # elements that can be interpolated
-    far_list::Vector{TargetTree{N,Td,U}}
-    # elements that cannot be interpolated
-    near_list::Vector{TargetTree{N,Td,U}}
-    # number of interpolation points per cone per dimension
-    p::NTuple{N,Int}
+Struct used to store data associated with a node of the `SourceTree`. The
+parametric type `N` represents the ambient dimension, `T` represents the
+primitive type used to represent the points (e.g. `Float32` or `Float64` for
+single/double precision), and `V` is the type of the density that will be
+interpolated.
+
+# Fields:
+- `msh`: uniform cartesian mesh of the interpolation space,
+    indexable by a `CartesianIndex`
+- `conedatadict`: dictionary mapping a cone tag `I::CartesianIndex` to an
+  `Array` storing its interpolation values/coefficient.
+- `farlist`: nodes on the target tree that can be evaluated through
+    interpolation
+- `nearlist`: nodes on the target tree that must be evaluated by a direct sum.
+"""
+mutable struct SourceTreeData{N,T,V}
+    msh::UniformCartesianMesh{N,T}
+    conedatadict::Dict{CartesianIndex{N},Union{Array{V,N},Nothing}}
+    farlist::Vector{TargetTree{N,T}}
+    nearlist::Vector{TargetTree{N,T}}
 end
-function SourceTreeData{N,Td,U}() where {N,Td,U}
-    if N == 2
-        domain = HyperRectangle{2,Td}((0,0),(0,0))
-        msh    = UniformCartesianMesh(domain,(1,1))
-    elseif N == 3
-        domain = HyperRectangle{3,Td}((0,0,0),(0,0,0))
-        msh    = UniformCartesianMesh(domain,(1,1,1))
-    else
-        notimplemented()
+
+function SourceTreeData{N,T,V}() where {N,T,V}
+    domain       = HyperRectangle{N,T}(ntuple(i->0,N),ntuple(i->0,N))
+    msh          = UniformCartesianMesh(domain, ntuple(i->1,N))
+    conedict     = Dict{CartesianIndex{N},Union{Array{V,N},Nothing}}()
+    farlist      = Vector{TargetTree{N,T}}()
+    nearlist     = Vector{TargetTree{N,T}}()
+    return SourceTreeData{N,T,V}(msh, conedict, farlist, nearlist)
+end
+
+"""
+    const SourceTree{N,T,V}
+
+Type alias for a `ClusterTree` of points (represented as `SVector{N,T}`) storing
+data of type [`SourceTreeDataLite{N,T,V}`](@ref). See the documentation of
+`ClusterTree` in [`WavePropBase`](https://github.com/WaveProp/WavePropBase.jl)
+for more information.
+"""
+const SourceTree{N,T,V} = ClusterTree{Vector{SVector{N,T}},HyperRectangle{N,T},SourceTreeData{N,T,V}}
+
+# getters for SourceTree
+msh(t::SourceTree)                            = t.data.msh
+conedatadict(t::SourceTree)                   = t.data.conedatadict
+active_cone_idxs(t::SourceTree)               = keys(conedatadict(t))
+farlist(t::SourceTree)                        = t.data.farlist
+nearlist(t::SourceTree)                       = t.data.nearlist
+WavePropBase.center(t::SourceTree)            = t |> container |> center
+cone_domains(t::SourceTree)                   = msh(t) |> ElementIterator # iterator of HyperRectangles
+cone_domain(t::SourceTree, I::CartesianIndex) = cone_domains(t)[I]
+conedata(t::SourceTree,I::CartesianIndex)    = conedatadict(t)[I]
+density_type(::SourceTree{N,T,V}) where {N,T,V} = V
+
+"""
+    allocate_interpolant_data!(node::SourceTree,::Val{P},[I])
+
+Allocate the memory necessary to construct the `I` cone interpolant of `node`
+with `P` points, where `P` is a tuple of integers. If `I` is absent, allocate
+data for *all* cone interpolants of `node`.
+"""
+function allocate_interpolant_data!(node::SourceTree,::Val{P},I) where {P}
+    V       = density_type(node)
+    dict    = conedatadict(node)
+    dict[I] = zeros(V,P)
+end
+function allocate_interpolant_data!(node::SourceTree,p::Val{P}) where {P}
+    for I in active_cone_idxs(node)
+        allocate_interpolant_data!(node,p,I)
     end
-    idxs      = Set{CartesianIndex{N}}()
-    far_list  = Vector{TargetTree{N,Td,U}}()
-    near_list = Vector{TargetTree{N,Td,U}}()
-    p = ntuple(i->0,N)
-    return SourceTreeData{N,Td,U}(msh,idxs,far_list,near_list,p)
-end
-
-const SourceTree{N,Td,V,U} = ClusterTree{V,HyperRectangle{N,Td},SourceTreeData{N,Td,U}}
-
-# getters
-cone_interp_msh(t::SourceTree)  = t.data.cone_interp_msh
-active_cone_idxs(t::SourceTree) = t.data.active_cone_idxs
-far_list(t::SourceTree)         = t.data.far_list
-near_list(t::SourceTree)        = t.data.near_list
-center(t::SourceTree)           = t |> container |> center
-cone_domains(t::SourceTree)     = cone_interp_msh(t) |> ElementIterator # iterator of HyperRectangles
-
-"""
-    active_cone_domains(t::SourceTree)
-
-Returns an iterator of the active cone interpolation domains
-(as HyperRectangles in interpolation coordinates `s`).
-"""
-function active_cone_domains(t::SourceTree)
-    iter = cone_domains(t) 
-    idxs = active_cone_idxs(t)
-    return (iter[i] for i in idxs)
+    return node
 end
 
 """
-    active_cone_idxs_and_domains(t::SourceTree)
+    free_interpolant_data!(node,[I])
 
-Returns an iterator that yields `(i,rec)`, where
-`i` is an active cone index and `rec` is its respective
-cone interpolation domain (as a HyperRectangle in interpolation
-coordinates `s`).
+
+Free the memory used to store the `I` cone interpolant of `node`. If `I` is
+absent, free data associated to *all* cone interpolants of `node`
 """
-function active_cone_idxs_and_domains(t::SourceTree)
-    iter = cone_domains(t) 
-    idxs = active_cone_idxs(t)
-    return ((i,iter[i]) for i in idxs)
+function free_interpolant_data!(node::SourceTree,I::CartesianIndex)
+    dict    = conedatadict(node)
+    dict[I] = nothing
+    return node
+end
+function free_interpolant_data!(node::SourceTree)
+    for I in active_cone_idxs(node)
+        free_interpolant_data!(node,I)
+    end
+    return node
 end
 
 # setters
-_addtofarlist!(s::SourceTree,t::TargetTree)  = push!(far_list(s),t)
-_addtonearlist!(s::SourceTree,t::TargetTree) = push!(near_list(s),t)
-_addtoconeidxs!(s::SourceTree,idxcone)       = push!(active_cone_idxs(s),idxcone)
-function _init_cone_interp_msh!(s::SourceTree,domain,ds)
-    s.data.cone_interp_msh = UniformCartesianMesh(domain;step=ds)
-    return nothing
-end
-
+_addtofarlist!(s::SourceTree, t::TargetTree)  = push!(farlist(s), t)
+_addtonearlist!(s::SourceTree, t::TargetTree) = push!(nearlist(s), t)
 
 """
+    _addnewcone!(node::SourceTree,I::CartesianIndex,p)
+
+If `node` does not contain cone `I`, add it to the `conedict`.
+"""
+function _addnewcone!(node::SourceTree, idxcone, ::Val{P}) where {P}
+    cd = conedatadict(node)
+    if !haskey(cd, idxcone)
+        push!(cd, idxcone => nothing)
+    end
+    return node
+end
+
+"""
+    _init_msh!(node,domain,ds)
+
+Create a uniform cartesian mesh of the interpolation domain of `node` with
+element spacing `ds`.
+"""
+function _init_msh!(node::SourceTree, domain, ds)
+    node.data.msh = UniformCartesianMesh(domain; step = ds)
+    return node
+end
+
+"""
+    interp2cart(s,xc,h)
     interp2cart(s,source::SourceTree)
 
 Map interpolation coordinate `s` into the corresponding cartesian coordinates.
 
-Interpolation coordinates are similar `polar` (in 2d) or `spherical` (in 3d)
-coordinates centered at the `center` of the  `source` box, except that the
-radial coordinate `r` is replaced by `s = h/R`, where `h` is the radius of the
-`source` box.
+Interpolation coordinates are similar to `polar` (in 2d) or `spherical` (in 3d)
+coordinates centered at the `xc`, except that the
+radial coordinate `r` is replaced by `s = h/r`.
+
+If passed a `SourceTree` as second argument, call `interp2cart(s,xc,h)` with
+`xc` the center of the `SourceTree` and `h` its radius.
 """
-function interp2cart(si,source::SourceTree{N}) where {N}
+function interp2cart(si, source::SourceTree)
     bbox = container(source)
     xc   = center(bbox)
     h    = radius(bbox)
+    interp2cart(si, xc, h)
+end
+
+function interp2cart(si, xc::SVector{N}, h::Number) where {N}
     if N == 2
-        s,θ  = si
-        @assert 0 ≤ θ < 2π
-        r    = h/s
-        x,y  = pol2cart(r,θ-π) #
-        return SVector(x,y) + xc
+        s, θ = si
+        @assert -π ≤ θ < π
+        r = h / s
+        sin_θ,cos_θ = sincos(θ)
+        x,y = r*cos(θ), r*sin(θ)
+        return SVector(x, y) + xc
     elseif N == 3
-        s,θ,ϕ  = si
-        @assert 0 ≤ θ < π "θ=$θ"
-        @assert 0 ≤ ϕ < 2π
-        r      = h/s
-        x,y,z  = sph2cart(r,θ,ϕ-π)
-        return SVector(x,y,z) + xc
+        s, θ, ϕ     = si
+        r           = h / s
+        sin_ϕ,cos_ϕ = sincos(ϕ)
+        sin_θ,cos_θ = sincos(θ)
+        x           = r * cos_ϕ * sin_θ
+        y           = r * sin_ϕ * sin_θ
+        z           = r * cos_θ
+        return SVector(x, y, z) + xc
     else
         notimplemented()
     end
 end
 
 """
+    cart2interp(x,c,h)
     cart2interp(x,source::SourceTree)
 
-Map cartesian coordinates `x` into the (local) interpolation coordinates `s`.
+Map cartesian coordinates `x` into interpolation coordinates `s` centered at `c`
+and scaled by `h`. Interpolation coordinates are similar to hyperspherical
+coordinates (e.g. polar in two-dimensions and spherical in three-dimensions),
+except that the radial coordinates is replaced by `s=h/r`.
+
+If passed a `SourceTree`, use its `center` and radius as `c` and `h` respectively.
 """
-function cart2interp(x,source::SourceTree{N}) where {N}
+@inline function cart2interp(x, source::SourceTree)
     bbox = container(source)
-    xp   = x - center(bbox)
+    c    = center(bbox)
     h    = radius(bbox)
+    cart2interp(x, c, h)
+end
+
+@inline function cart2interp(x, c::SVector{N}, h) where {N}
+    xp = x - c
     if N == 2
-        r,θ  = cart2pol(xp...)
-        s    = h/r
-        return SVector(s,θ+π)
+        x, y = xp
+        r = sqrt(x^2 + y^2)
+        θ = atan(y, x)
+        s = h / r
+        return SVector(s, θ)
     elseif N == 3
-        r,θ,ϕ  = cart2sph(xp...)
-        s = h/r
-        return SVector(s,θ,ϕ+π)
+        x, y, z = xp
+        ϕ = atan(y, x)
+        a = x^2 + y^2
+        θ = atan(sqrt(a),z)
+        r = sqrt(a + z^2)
+        s = h / r
+        # s = h * invsqrt(a + z^2)
+        return SVector(s, θ, ϕ)
     else
         notimplemented()
     end
 end
 
 """
-    initialize_source_tree(;Ypoints::Vector{V},datatype,splitter,Xdatatype) where V
+    initialize_source_tree(;points,datatype,splitter,Xdatatype)
 
 Create the tree-structure for clustering the source `points` using the splitting
-strategy of `splitter`, returning a `SourceTree` with an empty `data` field
-(i.e. `data = SourceTreeData()`).
+strategy of `splitter`, returning a `SourceTree` built through the empty
+constructor (i.e. `data = SourceTreeData()`).
 
 # Arguments
-- `Ypoints`: vector of source points.
-- `datatype`: return type of the IFGF method (e.g. `Float64` or `SVector{3,ComplexF64}`).
+- `points`: vector of source points.
 - `splitter`: splitting strategy.
-- `Xdatatype`: type of target points.
+- `Xdatatype`: type container of target points.
+- `Vdatatype`: type of value stored at interpolation nodes
 """
-function initialize_source_tree(;Ypoints::Vector{V},splitter,Xdatatype) where V
-    coords_datatype = Ypoints |> first |> coords |> typeof
-    @assert coords_datatype <: SVector
-    @assert isconcretetype(Xdatatype)
-    N = length(coords_datatype)
-    Td = eltype(coords_datatype)
-    source_tree_datatype = SourceTreeData{N,Td,Xdatatype}
-    source_tree = ClusterTree{source_tree_datatype}(Ypoints,splitter)
-    @assert source_tree isa SourceTree{N,Td}
+function initialize_source_tree(; Ypoints::Vector{SVector{N,T}}, splitter, Vdatatype) where {N,T}
+    source_tree_datatype = SourceTreeData{N,T,Vdatatype}
+    source_tree = ClusterTree{source_tree_datatype}(Ypoints, splitter)
     return source_tree
-end
-
-"""
-    compute_interaction_list!(source_tree,target_tree,adm=admissible)
-
-For each node in `source_tree`, compute its `near_list` and `far_list`. The
-`near_list` contains all nodes in `target_tree` for which the interaction must be
-computed using the direct summation.  The `far_list` includes all nodes in
-`target_tree` for which an accurate interpolant in available in the source node.
-
-The `adm` function is called through `adm(target,source)` to determine if
-`target` is in the `far_list` of source. When that is not the case, we recurse
-on the children of both `target` and `source` (unless both are a leaves, in which
-case `target` is added to the `near_list` of source).
-"""
-function compute_interaction_list!(source::SourceTree,
-                                   target::TargetTree,
-                                   adm=admissible)
-    # if either box is empty return immediately
-    if length(source) == 0 || length(target) == 0
-        return nothing
-    end
-    # handle the various possibilities
-    if adm(target,source)
-        _addtofarlist!(source,target)
-    elseif isleaf(target) && isleaf(source)
-        _addtonearlist!(source,target)
-    elseif isleaf(target)
-        # recurse on children of source
-        for source_child in children(source)
-            compute_interaction_list!(source_child,target,adm)
-        end
-    elseif isleaf(source)
-        # recurse on children of target
-        for target_child in children(target)
-            compute_interaction_list!(source,target_child,adm)
-        end
-    else
-        # recurse on children of target and source
-        for source_child in children(source)
-            for target_child in children(target)
-                compute_interaction_list!(source_child,target_child,adm)
-            end
-        end
-    end
-    return nothing
-end
-
-function admissible(target::TargetTree{N},source::SourceTree{N},η=sqrt(N)/N) where {N}
-    # compute distance between source center and target box
-    xc   = source |> container |> center
-    h    = source |> container |> radius
-    bbox = container(target)
-    dc   = distance(xc,bbox)
-    # if target box is outside a sphere of radius h/η, consider it admissible.
-    # The same parameter η is used to construct the interpolation domain where
-    # `s=h/r ∈ (0,η)` with η<1. This assures that target points which must be
-    # interpolated are inside the interpolation domain.
-    return dc > h/η
-end
-
-"""
-    cone_domain_size_func(k)
-    cone_domain_size_func(::Nothing)
-
-Returns the function `ds_func(s::SourceTree)` that computes the size
-of the cone interpolation domains. If a wavenumber `k` is passed, then 
-the cone domain sizes are computed in terms of `k` and the bounding box size of `s`.
-This is used in oscillatory kernels, e.g. Helmholtz. If `nothing` is passed, the
-cone domain sizes are set constant. This is used in static kernels, e.g. Laplace.
-"""
-function cone_domain_size_func(::Nothing)
-    # static case (e.g. Laplace)
-    function ds_func(::SourceTree{N}) where N
-        N != 3 && notimplemented()
-        ds = Float64.((1,π/2,π/2))
-        return ds
-    end
-    return ds_func
-end
-function cone_domain_size_func(k)
-    # oscillatory case (e.g. Helmholtz, Maxwell)
-    # k: wavenumber
-    function ds_func(source::SourceTree{N}) where N
-        N != 3 && notimplemented()
-        bbox = IFGF.container(source)
-        w    = maximum(IFGF.high_corner(bbox)-IFGF.low_corner(bbox))
-        ds   = Float64.((1,π/2,π/2))
-        δ    = k*w/2
-        return ds ./ max(δ,1)
-    end
-    return ds_func
-end
-
-function initialize_cone_interpolant!(source::SourceTree,p_func,ds_func)
-    length(source) == 0 && (return source)
-    ds      = ds_func(source)
-    p       = p_func(source)
-    data    = source.data
-    data.p  = p
-    # find minimal axis-aligned bounding box for interpolation points
-    domain         = compute_interpolation_domain(source)
-    all(low_corner(domain) .< high_corner(domain)) || (return source)
-    _init_cone_interp_msh!(source,domain,ds) # init cone interpolation domains
-    # initialize all cones needed to cover far field
-    for far_target in far_list(source) 
-        for x in points(far_target) # target points
-            idxcone = cone_index(x,source)
-            idxcone ∈ active_cone_idxs(source) && continue
-            _addtoconeidxs!(source,idxcone)
-        end
-    end
-    # if not a root, also create all cones needed to cover interpolation points of parents
-    if !isroot(source)
-        source_parent = parent(source)
-        for rec in active_cone_domains(source_parent) # active HyperRectangles
-            cheb = cheb2nodes_iter(source_parent.data.p,rec)
-            for si in cheb # interpolation node in interpolation space
-                # interpolation node in physical space
-                xi = interp2cart(si,source_parent)
-                # mesh index for interpolation point
-                idxcone = cone_index(xi,source)
-                # initialize cone if needed
-                idxcone ∈ active_cone_idxs(source) && continue
-                _addtoconeidxs!(source,idxcone)
-            end
-        end
-    end
-    return source
-end
-
-"""
-    compute_cone_list!(tree::SourceTree,p,ds_func)
-
-For each node in `source`, compute the cones which are necessary to cover
-both the target points on its `far_list` as well as the interpolation points on
-its parent's cones. The arguments `p` and `ds` are used to compute
-an appropriate interpolation order and meshsize in interpolation space.
-
-The algorithm starts at the root of the `source` tree, and travels down to the
-leaves.
-"""
-function compute_cone_list!(tree::SourceTree,p,ds_func)
-    for source in AbstractTrees.PreOrderDFS(tree)
-        initialize_cone_interpolant!(source,p,ds_func)
-    end
-    return tree
 end
 
 """
     compute_interpolation_domain(source::SourceTree)
 
-Compute a domain (as a `HyperRectangle`) in interpolation space for which
+Compute the minimal domain (as a `HyperRectangle`) in interpolation space for which
 `source` must provide a covering through its cone interpolants.
 """
-function compute_interpolation_domain(source::SourceTree{N,Td}) where {N,Td}
+function compute_interpolation_domain(source::SourceTree{N,Td},::Val{P}) where {N,Td,P}
     lb = svector(i->typemax(Td),N) # lower bound
     ub = svector(i->typemin(Td),N) # upper bound
     # nodes on far_list
-    for far_target in far_list(source)
-        for x in points(far_target) # target points
+    for far_target in farlist(source)
+        for x in Trees.elements(far_target) # target points
             s  = cart2interp(x,source)
             lb = min.(lb,s)
             ub = max.(ub,s)
         end
     end
+    refnodes = cheb2nodes(P)
     if !isroot(source)
         source_parent = parent(source)
-        for rec in active_cone_domains(source_parent)
-            cheb = cheb2nodes_iter(source_parent.data.p,rec)
+        for I in active_cone_idxs(source_parent)
+            rec  = cone_domain(source_parent,I)
+            lc,hc = low_corner(rec), high_corner(rec)
+            c0 = (lc+hc)/2
+            c1 = (hc-lc)/2
+            cheb  = map(x-> c0 + c1 .* x,refnodes)
             for si in cheb
                 # interpolation node in physical space
                 xi = interp2cart(si,source_parent)
@@ -336,97 +261,39 @@ function compute_interpolation_domain(source::SourceTree{N,Td}) where {N,Td}
     return domain
 end
 
-function cone_index(x,tree::SourceTree)
-    N = ambient_dimension(tree)
-    msh = cone_interp_msh(tree)  # UniformCartesianMesh
-    s   = cart2interp(x,tree)
-    els = ElementIterator(msh)
-    sz  = size(els)
-    Δs  = step(msh)
-    N   = length(s)
-    lc  = svector(i->msh.grids[i].start,N)
-    uc  = svector(i->msh.grids[i].stop,N)
-    I  = ntuple(N) do n
-        if s[n] ≈ lc[n]
-            i = 1
-        elseif s[n] ≈ uc[n]
-            i = sz[n]
-        else
-            q = (s[n]-lc[n])/Δs[n]
-            i = ceil(Int,q)
-        end
-        i
+"""
+    cone_index(x::SVector,tree::SourceTree)
+
+Given a point `x` in cartesian coordinates, return the index `I` of the cone in
+`source` to whcih `x` belongs, as well as its parametric coordinate `s`.
+
+## See also: [`cart2interp`](@ref)
+"""
+function cone_index(x::SVector, tree::SourceTree)
+    m = msh(tree)  # UniformCartesianMesh
+    s = cart2interp(x, tree)
+    I = element_index(s,m)
+    return I, s
+end
+
+"""
+    element_index(s::SVector,m::UniformCartesianMesh)
+
+Given a point `s ∈ m`, return the index `I` of the element in `m` containing
+`s`.
+"""
+function element_index(s::SVector{N},m::UniformCartesianMesh{N}) where {N}
+    els = ElementIterator(m)
+    sz = size(els)
+    Δs = step(m)
+    lc = svector(i -> m.grids[i].start, N)
+    uc = svector(i -> m.grids[i].stop, N)
+    # assert that lc <= s <= uc?
+    # @assert all(lc .<= s .<= uc)
+    I = ntuple(N) do n
+        q = (s[n] - lc[n]) / Δs[n]
+        i = ceil(Int, q)
+        clamp(i, 1, sz[n])
     end
     return CartesianIndex(I)
 end
-
-"""
-    interpolation_points(s::SourceTree,I::CartesianIndex)
-
-Return the interpolation points, in cartesian coordinates, for the cone
-interpolant of index `I`.
-"""
-function interpolation_points(source::SourceTree,I::CartesianIndex)
-    data   = source.data
-    els    = cone_domains(els)
-    rec    = els[I]
-    cheb   = cheb2nodes_iter(data.p,rec)
-    return map(si -> interp2cart(si,source),cheb)
-end
-
-#=
-## Plot recipes
-
-struct PlotInterpolationPoints end
-
-@recipe function f(::PlotInterpolationPoints,tree::SourceTree)
-    for (I,interp) in interp_data(tree)
-        @series begin
-            seriestype := :scatter
-            markercolor --> :black
-            markershape --> :cross
-            WavePropBase.IO.PlotPoints(), vec(interpolation_points(tree,I))
-        end
-    end
-end
-
-@recipe function f(tree::SourceTree)
-    legend --> false
-    grid   --> false
-    aspect_ratio := :equal
-    # plot source points
-    @series begin
-        seriestype := :scatter
-        markersize --> 5
-        markercolor --> :red
-        markershape := :circle
-        WavePropBase.IO.PlotPoints(),[coords(el) for el in elements(tree)]
-    end
-    # plot boudning box
-    @series begin
-        linecolor := :black
-        linewidth := 4
-        tree.bounding_box
-    end
-    # plot near_list
-    for target in tree.data.near_list
-        @series begin
-            linecolor := :green
-            markercolor := :green
-            target.bounding_box
-        end
-    end
-    # plot far list
-    for target in tree.data.far_list
-        @series begin
-            linecolor := :blue
-            markercolor := :blue
-            target.bounding_box
-        end
-    end
-    # plot interpolation points
-    @series begin
-        PlotInterpolationPoints(),tree
-    end
-end
-=#

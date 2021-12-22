@@ -1,47 +1,35 @@
 module IFGF
 
+const PROJECT_ROOT =  pkgdir(IFGF)
+
 using LinearAlgebra
 using StaticArrays
 using TimerOutputs
 using Printf
-using RecipesBase
-import AbstractTrees
+using FFTW
+
+import LinearAlgebra: mul!
 
 using WavePropBase
 using WavePropBase.Utils
 using WavePropBase.Geometry
 using WavePropBase.Mesh
 using WavePropBase.Interpolation
-
-WavePropBase.@import_interface
+using WavePropBase.Trees
 
 include("utils.jl")
 include("targettree.jl")
 include("sourcetree.jl")
+include("chebinterp.jl")
 include("ifgfoperator.jl")
 
 export
+    # re-export some modules from WavePropBase
+    Geometry,
+    Trees,
+    Utils,
     # types
-    UniformCartesianMesh,
-    DyadicSplitter,
-    CardinalitySplitter,
-    GeometricMinimalSplitter,
-    GeometricSplitter,
-    TargetTree,
-    SourceTree,
-    IFGFOperator,
-    # methods
-    initialize_target_tree,
-    initialize_source_tree,
-    compute_interaction_list!,
-    compute_cone_list!,
-    clear_interpolants!,
-    cone_domain_size_func,
+    IFGFOp,
     # macros
     @hprofile
-    # modules
-    Utils
-
-WavePropBase.@export_interface
-
 end
