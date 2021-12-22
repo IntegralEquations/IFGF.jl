@@ -16,7 +16,7 @@ splitter = Trees.DyadicSplitter(;nmax=100)
 T        = ComplexF64
 
 # specify the function to generate the point clouds
-pts_func = cube_uniform_surface_mesh
+pts_func = sphere_uniform_surface_mesh
 
 # loop over wavenumbers
 kvec = [2π,2π,4π,8π,16π,32π]
@@ -36,9 +36,9 @@ for k in kvec
     B   = randn(T,n)
     C   = zeros(T,n)
     exa = [sum(K( Xpts[i],Ypts[j])*B[j] for j in 1:n) for i in I]
-    tmp = @elapsed A  = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func,threads=false)
+    tmp = @elapsed A  = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func,threads=true)
     push!(ta,tmp)
-    tmp = @elapsed mul!(C,A,B,1,0;threads=false)
+    tmp = @elapsed mul!(C,A,B,1,0;threads=true)
     push!(tp,tmp)
     ee = norm(C[I]-exa,2) / norm(exa,2)
     push!(er,ee)
