@@ -16,6 +16,7 @@ WavePropBase = "91c5bd54-65f5-4719-ae3b-9579edfc4a0b"
 
 [compat]
 AbstractTrees = "0.3"
+BenchmarkTools = "1"
 RecipesBase = "1"
 StaticArrays = "1"
 TimerOutputs = "0.5"
