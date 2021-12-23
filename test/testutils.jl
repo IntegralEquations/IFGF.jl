@@ -69,6 +69,14 @@ function IFGF.near_interaction!(C,K::HelmholtzKernel,X,Y,σ,I,J)
     @views helmholtz3d_sl_vec!(C[I],Xm[:,I],Ym[:,J],σ[J],K.k)
 end
 
+function IFGF.transfer_factor(K::HelmholtzKernel,x,Y)
+    yc  = IFGF.center(Y)
+    yp  = IFGF.center(IFGF.parent(Y))
+    d   = norm(x-yc)
+    dp  = norm(x-yp)
+    exp(im*K.k*(d-dp))*dp/d
+end
+
 function helmholtz3d_sl_vec!(C,X,Y,σ,k)
     m,n = size(X,2), size(Y,2)
     C_T = reinterpret(Float64, C)

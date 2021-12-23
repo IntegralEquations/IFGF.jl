@@ -36,9 +36,9 @@ for k in kvec
     B   = randn(T,n)
     C   = zeros(T,n)
     exa = [sum(K( Xpts[i],Ypts[j])*B[j] for j in 1:n) for i in I]
-    tmp = @elapsed A  = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func,threads=true)
+    tmp = @elapsed A  = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func,threads=false)
     push!(ta,tmp)
-    tmp = @elapsed mul!(C,A,B,1,0;threads=true)
+    tmp = @elapsed mul!(C,A,B,1,0;threads=false)
     push!(tp,tmp)
     ee = norm(C[I]-exa,2) / norm(exa,2)
     push!(er,ee)

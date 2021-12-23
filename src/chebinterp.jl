@@ -50,9 +50,10 @@ end
     nodes1d = map(i->cheb2nodes(i),P)
     iter    = Iterators.product(nodes1d...)
     nodes   = SVector.(collect(iter))
-    # snodes  = SArray{Tuple{P...}}(nodes)
-    snodes = nodes
-    return :($snodes)
+    if prod(P) < 1e3
+        nodes  = SArray{Tuple{P...}}(nodes)
+    end
+    return :($nodes)
 end
 
 function cheb2nodes(p::Val{P},rec::HyperRectangle) where {P}

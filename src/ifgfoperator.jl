@@ -100,60 +100,6 @@ function IFGFOp(kernel,Xpoints,Ypoints;splitter,ds_func,adm=modified_admissibili
     return ifgf
 end
 
-function estimate_interpolation_order(kernel,partition,ds_func,tol,p)
-    nboxes = 20
-    # pick N random nodes at each deepest level and estimate the interpolation
-    # error by looking at the last chebyshev coefficients
-    # for nodes in partition
-    nodes = partition[end]
-    n  = length(nodes)
-    Δn = n ÷ nboxes
-    for i in 1:Δn:n
-        node = nodes[i]
-        er = Inf
-        while er > tol
-            N = ambient_dimension(node)
-            ds   = ds_func(node)
-            ers   = estimate_interpolation_error(kernel,node,ds,p)
-            er,imax = findmax(ers)
-            @debug ers,p
-            if er > tol
-                p = ntuple(N) do i
-                    i == imax ? p[i]+1 : p[i]
-                end
-            end
-        end
-    end
-    # end
-    return p
-end
-
-function estimate_interpolation_error(kernel,node::SourceTree{N,T,V},ds,p) where {N,T,V}
-    lb     = SVector(sqrt(eps()),0,-π)
-    # lb     = SVector(sqrt(N)/(2N),0,-π)
-    ub     = SVector(sqrt(N)/N,π,π)
-    domain = HyperRectangle(lb,ub)
-    msh    = UniformCartesianMesh(domain; step = ds)
-    els    = ElementIterator(msh)
-    # pick a random cone
-    I      = CartesianIndex((1,1,1))
-    rec    = els[I]
-    s      = cheb2nodes(p,rec) # cheb points in parameter space
-    x      = map(si->interp2cart(si,node),s)
-    irange = 1:length(x)
-    vals   = zeros(V,p...)
-    Ypts   = root_elements(node)[node.index_range]
-    B      = 2*rand(V,length(Ypts)) .- 1
-    jrange = 1:length(B)
-    near_interaction!(vals,kernel,x,Ypts,B,irange,jrange)
-    for i in eachindex(x)
-        xi = x[i] # cartesian coordinate of node
-        vals[i] /= centered_factor(kernel,xi,node)
-    end
-    coefs = chebcoefs!(reshape(vals,p...))
-    ntuple(i->cheb_error_estimate(coefs,i),N)
-end
-
 """
     compute_interaction_list!(ifgf::IFGFOperator,adm)
 
@@ -328,7 +274,7 @@ function _gemv!(C,K,target_tree,partition,B,T,p::Val{P}) where {P}
             # allocate necessary interpolation data and perform necessary
             # precomputations
             if isleaf(node)
-                @timeit_debug "P2M" _particle_to_moments!(node,K,B,p,plan)
+                @timeit_debug "P2M" _particles_to_moments!(node,K,B,p,plan)
             else
                 @timeit_debug "M2M" _moments_to_moments!(node,K,B,p,plan)
             end
@@ -337,7 +283,7 @@ function _gemv!(C,K,target_tree,partition,B,T,p::Val{P}) where {P}
         end
     end
     # since root has not parent, it must free its own ivals
-    root = partition |> first |> first
+    root = partition[1] |> first
     free_interpolant_data!(root)
 end
 
@@ -355,7 +301,7 @@ function _gemv_threaded!(C,K,target_tree,partition,B,T,p::Val{P}) where {P}
             length(node) == 0 && continue
             id = Threads.threadid()
             if isleaf(node)
-                _particle_to_moments!(node,K,B,p,plan)
+                _particles_to_moments!(node,K,B,p,plan)
             else
                 _moments_to_moments!(node,K,B,p,plan)
             end
@@ -400,16 +346,16 @@ function _moments_to_moments!(node::SourceTree{N,Td,Tv},K,B,p::Val{P},plan) wher
     return node
 end
 
-function _particle_to_moments!(node::SourceTree{N,Td,Tv},K,B,p::Val{P},plan) where {N,Td,Tv,P}
+function _particles_to_moments!(node::SourceTree{N,Td,Tv},K,B,p::Val{P},plan) where {N,Td,Tv,P}
     Ypts = node |> root_elements
     allocate_interpolant_data!(node,p)
     for I in active_cone_idxs(node)
-        rec = cone_domain(node,I)
-        s          = cheb2nodes(p,rec) # cheb points in parameter space
-        x          = map(si->interp2cart(si,node),s)
+        rec    = cone_domain(node,I)
+        s      = cheb2nodes(p,rec) # cheb points in parameter space
+        x      = map(si->interp2cart(si,node),s)
         irange = 1:length(x)
         jrange = index_range(node)
-        vals       = conedata(node,I)
+        vals::Array{Tv,N}   = conedata(node,I)
         near_interaction!(vals,K,x,Ypts,B,irange,jrange)
         for i in eachindex(x)
             xi = x[i] # cartesian coordinate of node
@@ -471,7 +417,7 @@ Scalar function used to help the interpolation of `I(x) = ∑ᵢ K(x,yᵢ)` wher
 and points `x` in the far field of `Y`. Defaults to `K(x,yc)` where `yc` is the
 center of `Y`.
 """
-function centered_factor(K,x,Y::SourceTree)
+function centered_factor(K,x,Y)
     yc = center(Y)
     return K(x,yc)
 end
@@ -482,9 +428,63 @@ end
 
 Ratio between the centered factor of `Y` and the centered factor of its parent.
 """
-function transfer_factor(K,x,Y::SourceTree)
+function transfer_factor(K,x,Y)
     yparent = parent(Y)
     return centered_factor(K,x,Y)/centered_factor(K,x,yparent)
+end
+
+function estimate_interpolation_order(kernel,partition,ds_func,tol,p)
+    nboxes = 20
+    # pick N random nodes at each deepest level and estimate the interpolation
+    # error by looking at the last chebyshev coefficients
+    # for nodes in partition
+    nodes = partition[end]
+    n  = length(nodes)
+    Δn = n ÷ nboxes
+    for i in 1:Δn:n
+        node = nodes[i]
+        er = Inf
+        while er > tol
+            N = ambient_dimension(node)
+            ds   = ds_func(node)
+            ers   = estimate_interpolation_error(kernel,node,ds,p)
+            er,imax = findmax(ers)
+            @debug ers,p
+            if er > tol
+                p = ntuple(N) do i
+                    i == imax ? p[i]+1 : p[i]
+                end
+            end
+        end
+    end
+    # end
+    return p
+end
+
+function estimate_interpolation_error(kernel,node::SourceTree{N,T,V},ds,p) where {N,T,V}
+    lb     = SVector(sqrt(eps()),0,-π)
+    # lb     = SVector(sqrt(N)/(2N),0,-π)
+    ub     = SVector(sqrt(N)/N,π,π)
+    domain = HyperRectangle(lb,ub)
+    msh    = UniformCartesianMesh(domain; step = ds)
+    els    = ElementIterator(msh)
+    # pick a random cone
+    I      = CartesianIndex((1,1,1))
+    rec    = els[I]
+    s      = cheb2nodes(p,rec) # cheb points in parameter space
+    x      = map(si->interp2cart(si,node),s)
+    irange = 1:length(x)
+    vals   = zeros(V,p...)
+    Ypts   = root_elements(node)[node.index_range]
+    B      = 2*rand(V,length(Ypts)) .- 1
+    jrange = 1:length(B)
+    near_interaction!(vals,kernel,x,Ypts,B,irange,jrange)
+    for i in eachindex(x)
+        xi = x[i] # cartesian coordinate of node
+        vals[i] /= centered_factor(kernel,xi,node)
+    end
+    coefs = chebcoefs!(reshape(vals,p...))
+    ntuple(i->cheb_error_estimate(coefs,i),N)
 end
 
 function Base.show(io::IO,ifgf::IFGFOp)
