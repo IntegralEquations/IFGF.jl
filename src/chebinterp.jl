@@ -94,6 +94,11 @@ function chebcoefs!(vals::AbstractArray{<:Number,N},plan::FFTW.FFTWPlan) where {
     return vals
 end
 
+function chebcoefs!(vals::AbstractArray{<:SVector{K}},plan) where {K}
+    coefs = ntuple(i -> chebcoefs!([v[i] for v in vals],plan), Val{K}())
+    copyto!(vals,SVector{K}.(coefs...))
+end
+
 @fastmath function chebeval(coefs,x::SVector{N,<:Real},rec::HyperRectangle,sz::Val{SZ}) where {N,SZ}
     x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
     return evaluate(x0, coefs, Val{N}(), 1, length(coefs),sz)
