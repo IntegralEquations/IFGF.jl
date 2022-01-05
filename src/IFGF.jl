@@ -30,6 +30,8 @@ export
     Utils,
     # types
     IFGFOp,
+    # methods
+    assemble_ifgf,
     # macros
     @hprofile
 end

@@ -296,7 +296,7 @@ The [`assemble_ifgf`](@ref) provides a high-level constructor for the `IFGFOp`
 structure by making various default choices of clustering algorithms,
 admisibility condition, how the interpolation cones should be created, etc. To
 obtain a more granular control over these parameters, you have to create them
-independently and pass them to the (defaulf) [`IFGF{T}`](@ref) constructor
+independently and pass them to the (default) [`IFGF`](@ref) constructor
 
 Resuming the example for the Helmholtz kernel, we will go over all the steps to
 manually construct the fields of the `IFGFOp`.

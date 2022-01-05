@@ -2,7 +2,9 @@ using Test
 using LinearAlgebra
 using StaticArrays
 using IFGF
-using IFGF: DyadicSplitter
+
+K(x,y)   = 1/norm(x-y)
+IFGF.wavenumber(::typeof(K)) = 0
 
 @testset "Near field" begin
     @testset "Single leaf" begin
@@ -10,15 +12,13 @@ using IFGF: DyadicSplitter
         nz = 5
         Xpts  = rand(SVector{2,Float64},nx)
         Ypts  = rand(SVector{2,Float64},ny)
-        splitter = DyadicSplitter(;nmax=250)
         p   = (4,4)
         ds_func  = (x) -> (1/4,2π/4)
-        K(x,y)   = 1/norm(x-y)
         A_mat = [K(x,y) for x in Xpts, y in Ypts]
         B     = rand(ny)
         B_mat = rand(ny,nz)
         C     = zeros(nx)
-        A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func)
+        A     = assemble_ifgf(K,Xpts,Ypts;order=p,nmax=250)
         mul!(C,A,B)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
@@ -26,18 +26,15 @@ using IFGF: DyadicSplitter
     end
     @testset "Tree" begin
         nx,ny = 100, 200
-        nz = 5
+        p   = (4,4)
+        nz    = 5
         Xpts  = rand(SVector{2,Float64},nx)
         Ypts  = rand(SVector{2,Float64},ny)
-        splitter = DyadicSplitter(;nmax=100)
-        p      = (4,4)
-        ds_func  = (x) -> (1/4,2π/4)
-        K(x,y)   = 1/norm(x-y)
         A_mat = [K(x,y) for x in Xpts, y in Ypts]
         B     = rand(ny)
         B_mat = rand(ny,nz)
         C     = zeros(nx)
-        A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func)
+        A     = assemble_ifgf(K,Xpts,Ypts;order=p,nmax=100)
         mul!(C,A,B)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
@@ -49,17 +46,14 @@ end
     @testset "Single leaf" begin
         nx,ny = 100, 200
         nz = 5
+        p   = (4,4)
         Xpts  = rand(SVector{2,Float64},nx)
         Ypts  = [SVector(10,10)+rand(SVector{2,Float64}) for _ in 1:ny]
-        splitter = DyadicSplitter(;nmax=250)
-        p   = (10,10)
-        ds_func  = (x) -> (1/4,2π/8)
-        K(x,y)   = 1/norm(x-y)
         A_mat = [K(x,y) for x in Xpts, y in Ypts]
         B     = rand(ny)
         B_mat = rand(ny,nz)
         C     = zeros(nx)
-        A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func)
+        A     = assemble_ifgf(K,Xpts,Ypts;order=p,nmax=250)
         mul!(C,A,B)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
@@ -67,18 +61,15 @@ end
     end
     @testset "Tree" begin
         nx,ny = 100, 200
-        nz = 5
+        nz    = 5
+        p   = (4,4)
         Xpts  = rand(SVector{2,Float64},nx)
         Ypts  = [SVector(10,10)+rand(SVector{2,Float64}) for _ in 1:ny]
-        splitter = DyadicSplitter(;nmax=100)
-        p   = (10,10)
-        ds_func  = x -> (1/4,2π/8)
-        K(x,y)   = 1/norm(x-y)
         A_mat = [K(x,y) for x in Xpts, y in Ypts]
         B     = rand(ny)
         B_mat = rand(ny,nz)
         C     = zeros(nx)
-        A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func)
+        A     = assemble_ifgf(K,Xpts,Ypts;order=p,nmax=100)
         mul!(C,A,B)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
@@ -91,15 +82,12 @@ end
     nz = 3
     Xpts   = rand(SVector{3,Float64},nx)
     Ypts   = [SVector(1,1,1)+rand(SVector{3,Float64}) for _ in 1:ny]
-    splitter = DyadicSplitter(;nmax=20)
-    p   = (10,10,10)
-    ds_func  = x -> (1/4,2π/8,π/8)
-    K(x,y)   = 1/norm(x-y)
+    p     = (7,7,7)
     A_mat = [K(x,y) for x in Xpts, y in Ypts]
     B     = rand(ny)
     B_mat = rand(ny,nz)
     C     = zeros(nx)
-    A     = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func)
+    A     = assemble_ifgf(K,Xpts,Ypts;order=p,nmax=50)
     bytes_before = Base.summarysize(A)
     mul!(C,A,B)
     @test size(A) == (nx,ny)
