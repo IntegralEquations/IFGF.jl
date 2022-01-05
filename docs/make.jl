@@ -4,7 +4,7 @@ using Documenter
 DocMeta.setdocmeta!(IFGF, :DocTestSetup, :(using IFGF); recursive=true)
 
 makedocs(;
-    modules=[IFGF],
+    modules=[IFGF,Trees],
     authors="Luiz M. Faria <maltezfaria@gmail.com> and contributors",
     repo="https://github.com/WaveProp/IFGF.jl/blob/{commit}{path}#{line}",
     sitename="IFGF.jl",
@@ -15,6 +15,7 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
+        "References" => "references.md",
     ],
 )
 

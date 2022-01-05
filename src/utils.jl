@@ -35,7 +35,7 @@ Returns an anonymous function `(node) -> Δs` that computes an appropriate size
 wavenumber `k`. The function is constructed so as to scale `Δs₀` by the inverse
 of the acoustic size of `node`.
 """
-function cone_domain_size_func(k, ds = Float64.((1, π / 2, π / 2)))
+function cone_domain_size_func(k, ds)
     if k == 0
         func = (node) -> ds
     else
@@ -46,6 +46,27 @@ function cone_domain_size_func(k, ds = Float64.((1, π / 2, π / 2)))
             w    = maximum(high_corner(bbox) - low_corner(bbox))
             δ    = max(k * w / 2,1)
             ds ./ δ
+        end
+    end
+    return func
+end
+
+function cone_domain_size_func(k, ds::Number)
+    if k == 0
+        func = (node) -> begin
+            N = ambient_dimension(node)
+            ntuple(i->ds,N)
+        end
+    else
+        # oscillatory case (e.g. Helmholtz, Maxwell)
+        # k: wavenumber
+        func = (node) -> begin
+            N  = ambient_dimension(node)
+            ds_tup = ntuple(i->ds,N)
+            bbox = IFGF.container(node)
+            w    = maximum(high_corner(bbox) - low_corner(bbox))
+            δ    = max(k * w / 2,1)
+            ds_tup ./ δ
         end
     end
     return func
@@ -97,7 +118,7 @@ end
 """
     cheb_error_estimate(coefs::AbstractArray{T,N},dim)
 
-Given an `N` dimensional array of coeffients , estimate the relative error
+Given an `N` dimensional array of coefficients , estimate the relative error
 commited by the Chebyshev interpolant along dimension `dim`.
 """
 function cheb_error_estimate(coefs::AbstractArray{T,N},dim) where {T,N}
@@ -111,3 +132,11 @@ function cheb_error_estimate(coefs::AbstractArray{T,N},dim) where {T,N}
     end
     norm(view(coefs,I...),2) / norm(coefs,2)
 end
+
+"""
+    wavenumber(K::Function)
+
+For oscillatory kernels, return the characteristic wavenumber (i.e `2π` divided
+by he wavelength). For non-oscillatory kernels, return `0`.
+"""
+function wavenumber end

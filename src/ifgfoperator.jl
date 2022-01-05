@@ -14,6 +14,8 @@ function, and `X` and `Y` are the elements of the `target_tree` and
   of far interactions
 - `ds_func` : function used to compute and appropriate mesh size in parameter
   space. See e.g. [`cone_domain_size_func`](@ref)
+- `adm_func` : function used to determine if the block with targets on box `A`
+  and sources on box `B` admit a low-rank approximation
 - `_source_tree_depth_partition` : vector with `i`-th entry containing all nodes
   of the of depth `i-1`, where the root is given a depth of `0`.
 """
@@ -23,17 +25,19 @@ struct IFGFOp{T} <: AbstractMatrix{T}
     source_tree::SourceTree
     p::NTuple
     ds_func::Function
+    adm_func::Function
     _source_tree_depth_partition
 end
 
 # getters
-rowrange(ifgf::IFGFOp)        = Trees.index_range(ifgf.target_tree)
-colrange(ifgf::IFGFOp)        = Trees.index_range(ifgf.source_tree)
-kernel(op::IFGFOp)            = op.kernel
-target_tree(op::IFGFOp)       = op.target_tree
-source_tree(op::IFGFOp)       = op.source_tree
-polynomial_order(op::IFGFOp) = op.p
-meshsize_func(op::IFGFOp)     = op.ds_func
+rowrange(ifgf::IFGFOp)         = Trees.index_range(ifgf.target_tree)
+colrange(ifgf::IFGFOp)         = Trees.index_range(ifgf.source_tree)
+kernel(op::IFGFOp)             = op.kernel
+target_tree(op::IFGFOp)        = op.target_tree
+source_tree(op::IFGFOp)        = op.source_tree
+polynomial_order(op::IFGFOp)   = op.p
+meshsize_func(op::IFGFOp)      = op.ds_func
+admissibility_func(op::IFGFOp) = op.adm_func
 
 function Base.size(op::IFGFOp)
     sizeX = op |> target_tree |> root_elements |> length
@@ -47,111 +51,65 @@ function Base.getindex(::IFGFOp,args...)
 end
 
 """
-    IFGFOperator(kernel,Ypoints,Xpoints;splitter,p=nothing,tol=0,ds_func,threads=true)
+    assemble_ifgf(K,X,Y;nmax=100,adm=modified_admissibility_condition,order=nothing,tol=1e-4,Δs=1.0,threads=true)
 
-Construct a linear operator reprensenting the action of `kernel` on each of
-`Xpoints` and `Ypoints`.
+Construct an approximation of the matrix `[K(x,y) for x ∈ X, y ∈ Y]`. If the
+kernel function `K` is oscillatory, you should implement the method
+`wavenumber(::typeof(K)) --> Number` to return its wavenumber.
 
-# Arguments
-- `kernel`: kernel of the IFGF operator.
-- `Xpoints`: vector of target points.
-- `Ypoints`: vector of source points.
-- `splitter`: splitting strategy (e.g. [`DyadicSplitter`](@ref) or [`CardinalitySplitter`](@ref)).
-- `p`: number of interpolation points per dimension in interpolation
-  coordinates. In 3D, `p = (ns,nθ,nϕ)`. In 2D, `p = (ns,nθ)`.
-- `tol`: desired relative tolerance of approximation. When `tol!=0`, a value of
-  `p` is estimated during the construction.
-- `ds_func`: function `ds_func(source_tree) = ds` that returns the size of the
-  cone domains per dimension in interpolation coordinates. In 3D, `ds =
-  (dss,dsθ,dsϕ)`. In 2D, `ds = (dss,dsθ)`.
+The error in the approximation is controlled by two parameters: `Δs` and `order`.
+These parameters dictate the mesh size and interpolation order of the parametric
+space used to build the cone interpolants. While the `order` is held constant
+across all source cells, the `Δs` parameter controls only the size of the *low-frequency*
+cells; for cells of large acoustic size, the mesh size is adapted so as to keep
+the interpolation error constant across different levels of the source tree (see
+[`cone_domain_size_func`](@ref) for implementation details).
+
+If the keyword `order` is ommited, a tolerance `tol` must be passed. It will
+then be used to estimate an appropriate interpolation `order`.
+
+`nmax` can be used to control the maximum number of points contained in the
+target/source trees.
+
+The `adm` function gives a criterion to determine if the interaction between a
+target cell and a source cell should be computed using an interpolation scheme.
 """
-function IFGFOp(kernel,Xpoints,Ypoints;splitter,ds_func,adm=modified_admissibility_condition,threads=true,tol=0,p=nothing)
+function assemble_ifgf(kernel,Xpoints,Ypoints;
+                nmax    = 100,
+                adm     = modified_admissibility_condition,
+                tol     = 1e-4,
+                order   = nothing,
+                Δs      = 1.0,
+                threads = true)
+
+    splitter = CardinalitySplitter(nmax)
+    k        = wavenumber(kernel)
+    ds_func  = cone_domain_size_func(k,Δs)
     # infer the type of the matrix, then compute the type of density to be
     # interpolated
-    @assert !(isnothing(p) && tol > 0) "either `p` or `tol` must be passed as a keyword argument"
-    U,V = eltype(Xpoints), eltype(Ypoints)
-    T = hasmethod(return_type,Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel,U,V)
+    @assert tol >= 0 "`tol` must be a positive real number"
+    U,V     = eltype(Xpoints), eltype(Ypoints)
+    T       = hasmethod(return_type,Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel,U,V)
     assert_concrete_type(T)
-    Tv = _density_type_from_kernel_type(T)
+    Tv      = _density_type_from_kernel_type(T)
     # create source and target trees
     @timeit_debug "source tree initialization" begin
         source_tree = initialize_source_tree(;Ypoints,splitter,Vdatatype=Tv)
     end
+    partition = Trees.partition_by_depth(source_tree)
     @timeit_debug "target tree initialization" begin
         target_tree = initialize_target_tree(;Xpoints,splitter)
     end
-    partition = Trees.partition_by_depth(source_tree)
-    # estimate interpolation order if needed
-    if p === nothing
-        @timeit_debug "estimate interpolation order" begin
-            p = estimate_interpolation_order(kernel,partition,ds_func,tol,(2,2,2))
-        end
-        @info "estimated interpolation order = $p"
+    # if `order` is not passed explicitly, estimate it
+    if order === nothing
+        order = estimate_interpolation_order(kernel,partition,ds_func,tol,(2,2,2))
     end
-    # intialize ifgf object
-    ifgf = IFGFOp{T}(kernel, target_tree, source_tree, p, ds_func, partition)
-    # update interaction lists
-    @timeit_debug "cell interactions" begin
-        compute_interaction_list!(ifgf,adm)
-    end
-    @timeit_debug "cone lists" begin
-        compute_cone_list!(ifgf,threads)
-    end
+    p = order .+ 1
+    _compute_interaction_list!(source_tree,target_tree,adm)
+    _compute_cone_list!(partition,Xpoints,Val(p),ds_func,threads)
+    # call main constructor
+    ifgf = IFGFOp{T}(kernel, target_tree, source_tree, p, ds_func, adm, partition)
     return ifgf
-end
-
-function estimate_interpolation_order(kernel,partition,ds_func,tol,p)
-    nboxes = 20
-    # pick N random nodes at each deepest level and estimate the interpolation
-    # error by looking at the last chebyshev coefficients
-    # for nodes in partition
-    nodes = partition[end]
-    n  = length(nodes)
-    Δn = n ÷ nboxes
-    for i in 1:Δn:n
-        node = nodes[i]
-        er = Inf
-        while er > tol
-            N = ambient_dimension(node)
-            ds   = ds_func(node)
-            ers   = estimate_interpolation_error(kernel,node,ds,p)
-            er,imax = findmax(ers)
-            @debug ers,p
-            if er > tol
-                p = ntuple(N) do i
-                    i == imax ? p[i]+1 : p[i]
-                end
-            end
-        end
-    end
-    # end
-    return p
-end
-
-function estimate_interpolation_error(kernel,node::SourceTree{N,T,V},ds,p) where {N,T,V}
-    lb     = SVector(sqrt(eps()),0,-π)
-    # lb     = SVector(sqrt(N)/(2N),0,-π)
-    ub     = SVector(sqrt(N)/N,π,π)
-    domain = HyperRectangle(lb,ub)
-    msh    = UniformCartesianMesh(domain; step = ds)
-    els    = ElementIterator(msh)
-    # pick a random cone
-    I      = CartesianIndex((1,1,1))
-    rec    = els[I]
-    s      = cheb2nodes(p,rec) # cheb points in parameter space
-    x      = map(si->interp2cart(si,node),s)
-    irange = 1:length(x)
-    vals   = zeros(V,p...)
-    Ypts   = root_elements(node)[node.index_range]
-    B      = 2*rand(V,length(Ypts)) .- 1
-    jrange = 1:length(B)
-    near_interaction!(vals,kernel,x,Ypts,B,irange,jrange)
-    for i in eachindex(x)
-        xi = x[i] # cartesian coordinate of node
-        vals[i] /= centered_factor(kernel,xi,node)
-    end
-    coefs = chebcoefs!(reshape(vals,p...))
-    ntuple(i->cheb_error_estimate(coefs,i),N)
 end
 
 """
@@ -167,48 +125,51 @@ The `adm` function is called through `adm(target,source)` to determine if
 on their children unless both are a leaves, in which
 case `target` is added to the `nearlist` of source.
 """
-function compute_interaction_list!(ifgf::IFGFOp,adm)
-    _compute_interaction_list!(source_tree(ifgf),target_tree(ifgf),adm)
+function compute_interaction_list!(ifgf::IFGFOp,threads=false)
+    # TODO: implement threaded implementation of this pass
+        _compute_interaction_list!(source_tree(ifgf),target_tree(ifgf),admissibility_func(ifgf))
     return ifgf
 end
 
 function _compute_interaction_list!(source::SourceTree, target::TargetTree, adm)
-    # if either box is empty return immediately
-    if length(source) == 0 || length(target) == 0
-        return nothing
-    end
-    # handle the various possibilities
-    if adm(target, source)
-        _addtofarlist!(source, target)
-    elseif isleaf(target) && isleaf(source)
-        _addtonearlist!(source, target)
-    elseif isleaf(target)
-        # recurse on children of source
-        for source_child in children(source)
-            _compute_interaction_list!(source_child, target, adm)
+    @timeit_debug "cell interactions" begin
+        # if either box is empty return immediately
+        if length(source) == 0 || length(target) == 0
+            return nothing
         end
-    elseif isleaf(source)
-        # recurse on children of target
-        for target_child in children(target)
-            _compute_interaction_list!(source, target_child, adm)
-        end
-    else
-        # TODO: when both have children, how to recurse down? Two strategies
-        # below:
-        # strategy 1: recurse on children of largest box
-        # if radius(source) > radius(target)
-        #     for source_child in children(source)
-        #         compute_interaction_list!(source_child, target, adm)
-        #     end
-        # else
-        #     for target_child in children(target)
-        #         compute_interaction_list!(source, target_child, adm)
-        #     end
-        # end
-        # strategy 2: recurse on children of both target and source
-        for source_child in children(source)
+        # handle the various possibilities
+        if adm(target, source)
+            _addtofarlist!(source, target)
+        elseif isleaf(target) && isleaf(source)
+            _addtonearlist!(source, target)
+        elseif isleaf(target)
+            # recurse on children of source
+            for source_child in children(source)
+                _compute_interaction_list!(source_child, target, adm)
+            end
+        elseif isleaf(source)
+            # recurse on children of target
             for target_child in children(target)
-                _compute_interaction_list!(source_child, target_child, adm)
+                _compute_interaction_list!(source, target_child, adm)
+            end
+        else
+            # TODO: when both have children, how to recurse down? Two strategies
+            # below:
+            # strategy 1: recurse on children of largest box
+            # if radius(source) > radius(target)
+            #     for source_child in children(source)
+            #         compute_interaction_list!(source_child, target, adm)
+            #     end
+            # else
+            #     for target_child in children(target)
+            #         compute_interaction_list!(source, target_child, adm)
+            #     end
+            # end
+            # strategy 2: recurse on children of both target and source
+            for source_child in children(source)
+                for target_child in children(target)
+                    _compute_interaction_list!(source_child, target_child, adm)
+                end
             end
         end
     end
@@ -286,7 +247,14 @@ function _initialize_cone_interpolants!(source::SourceTree{N}, X, p::Val{P}, ds_
     return source
 end
 
-function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOp, x::AbstractVector, a::Number, b::Number;global_index=true,threads=false)
+"""
+    mul!(y,A::IFGFOp,x,a,b;global_index=true,threads=true)
+
+Like the `mul!` function from `LinearAlgebra`. Setting `global_index=false`
+uses the internal indexing system of the `IFGFOp`, and therefore does not
+permute the vectors `x` and `y` to perform the multiplication.
+"""
+function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOp, x::AbstractVector, a::Number, b::Number;global_index=true,threads=true)
     # since the IFGF represents A = Pr*K*Pc, where Pr and Pc are row and column
     # permutations, we need first to rewrite C <-- b*C + a*(Pc*H*Pb)*B as
     # C <-- Pr*(b*inv(Pr)*C + a*H*(Pc*B)). Following this rewrite, the
@@ -320,15 +288,16 @@ end
 
 function _gemv!(C,K,target_tree,partition,B,T,p::Val{P}) where {P}
     Tv = _density_type_from_kernel_type(T)
-    # do some planning for the fft
-    plan = FFTW.plan_r2r!(zeros(Tv,P),FFTW.REDFT00;flags=FFTW.PATIENT)
+    # do some planning for the fft. Since `Tv` may be an `SVector`, we plan on
+    # its element type and perform the FFT on each component
+    plan = FFTW.plan_r2r!(zeros(eltype(Tv),P),FFTW.REDFT00;flags=FFTW.PATIENT)
     for depth in Iterators.reverse(partition)
         for node in depth
             length(node) == 0 && continue
             # allocate necessary interpolation data and perform necessary
             # precomputations
             if isleaf(node)
-                @timeit_debug "P2M" _particle_to_moments!(node,K,B,p,plan)
+                @timeit_debug "P2M" _particles_to_moments!(node,K,B,p,plan)
             else
                 @timeit_debug "M2M" _moments_to_moments!(node,K,B,p,plan)
             end
@@ -337,7 +306,7 @@ function _gemv!(C,K,target_tree,partition,B,T,p::Val{P}) where {P}
         end
     end
     # since root has not parent, it must free its own ivals
-    root = partition |> first |> first
+    root = partition[1] |> first
     free_interpolant_data!(root)
 end
 
@@ -355,7 +324,7 @@ function _gemv_threaded!(C,K,target_tree,partition,B,T,p::Val{P}) where {P}
             length(node) == 0 && continue
             id = Threads.threadid()
             if isleaf(node)
-                _particle_to_moments!(node,K,B,p,plan)
+                _particles_to_moments!(node,K,B,p,plan)
             else
                 _moments_to_moments!(node,K,B,p,plan)
             end
@@ -367,13 +336,13 @@ function _gemv_threaded!(C,K,target_tree,partition,B,T,p::Val{P}) where {P}
     for i in 1:nt
         axpy!(1,Cthreads[i],C)
     end
-    # since root has not parent, it must free its own ivals
-    root = partition |> first |> first
+    # since root has not parent, it must free its own interpolation data
+    root = partition[1] |> first
     free_interpolant_data!(root)
 end
 
 function _moments_to_moments!(node::SourceTree{N,Td,Tv},K,B,p::Val{P},plan) where {N,Td,Tv,P}
-    allocate_interpolant_data!(node,p)
+    @timeit_debug "allocation" allocate_interpolant_data!(node,p)
     for I in active_cone_idxs(node)
         rec = cone_domain(node,I)
         s          = cheb2nodes(p,rec) # cheb points in parameter space
@@ -384,14 +353,14 @@ function _moments_to_moments!(node::SourceTree{N,Td,Tv},K,B,p::Val{P},plan) wher
             for i in eachindex(x)
                 idxcone,si   = cone_index(x[i], chd)
                 # transfer block's interpolant to parent's interpolants
-                rec   = cone_domains(chd)[idxcone]
+                rec   = cone_domain(chd,idxcone)
                 coefs = conedata(chd,idxcone)
-                vals[i] += chebeval(coefs,si,rec,p) * transfer_factor(K,x[i],chd)
+                vals[i] += transfer_factor(K,x[i],chd)*chebeval(coefs,si,rec,p)
             end
         end
         # transform vals to coefs in place. Coefs will be used later when the
         # current node transfers its expansion to its parent
-        coefs = chebcoefs!(reshape(vals,P...),plan)
+        coefs = chebcoefs!(vals,plan)
     end
     # interps on children no longer needed
     for chd in children(node)
@@ -400,20 +369,20 @@ function _moments_to_moments!(node::SourceTree{N,Td,Tv},K,B,p::Val{P},plan) wher
     return node
 end
 
-function _particle_to_moments!(node::SourceTree{N,Td,Tv},K,B,p::Val{P},plan) where {N,Td,Tv,P}
+function _particles_to_moments!(node::SourceTree{N,Td,Tv},K,B,p::Val{P},plan) where {N,Td,Tv,P}
     Ypts = node |> root_elements
     allocate_interpolant_data!(node,p)
     for I in active_cone_idxs(node)
-        rec = cone_domain(node,I)
-        s          = cheb2nodes(p,rec) # cheb points in parameter space
-        x          = map(si->interp2cart(si,node),s)
+        rec    = cone_domain(node,I)
+        s      = cheb2nodes(p,rec) # cheb points in parameter space
+        x      = map(si->interp2cart(si,node),s)
         irange = 1:length(x)
         jrange = index_range(node)
-        vals       = conedata(node,I)
+        vals::Array{Tv,N}   = conedata(node,I)
         near_interaction!(vals,K,x,Ypts,B,irange,jrange)
         for i in eachindex(x)
             xi = x[i] # cartesian coordinate of node
-            vals[i] /= centered_factor(K,xi,node)
+            vals[i] = inv_centered_factor(K,xi,node)*vals[i]
         end
         coefs = chebcoefs!(vals,plan)
     end
@@ -428,10 +397,10 @@ function _moments_to_particles!(C,K,target_tree,node::SourceTree{N,T},p::Val{P})
             I,s      = cone_index(coords(x),node)
             rec      = cone_domain(node,I)
             coefs    = conedata(node,I)
-            C[i]  += chebeval(coefs,s,rec,p) * centered_factor(K,Xpts[i],node)
+            C[i]  += centered_factor(K,Xpts[i],node) * chebeval(coefs,s,rec,p)
         end
     end
-    return nothing
+    return C
 end
 
 function _particles_to_particles!(C,K,target_tree,source_tree,B,node)
@@ -443,7 +412,7 @@ function _particles_to_particles!(C,K,target_tree,source_tree,B,node)
         J = index_range(node)
         near_interaction!(C,K,Xpts,Ypts,B,I,J)
    end
-    return nothing
+    return C
 end
 
 """
@@ -460,6 +429,7 @@ function near_interaction!(C,K,X,Y,σ,I,J)
             C[i] += K(X[i], Y[j]) * σ[j]
         end
     end
+    return C
 end
 
 
@@ -467,13 +437,22 @@ end
 """
     centered_factor(K,x,Y::SourceTree)
 
-Scalar function used to help the interpolation of `I(x) = ∑ᵢ K(x,yᵢ)` where `yᵢ ∈ Y`
-and points `x` in the far field of `Y`. Defaults to `K(x,yc)` where `yc` is the
-center of `Y`.
+Return a representative value of `K(x,y)` for `y ∈ Y`. This is used to help the
+interpolation of `I(x) = ∑ᵢ K(x,yᵢ)` where `yᵢ ∈ Y` and points `x` in the far
+field of `Y`. Defaults to `K(x,yc)` where `yc` is the center of `Y`.
 """
-function centered_factor(K,x,Y::SourceTree)
+function centered_factor(K,x,Y)
     yc = center(Y)
     return K(x,yc)
+end
+
+"""
+    inv_centered_factor(K,x,Y)
+
+Inverse of [`centered_factor`](@ref).
+"""
+@inline function inv_centered_factor(K,x,Y)
+    inv(centered_factor(K,x,Y))
 end
 
 # generic fallback. May need to be overloaded for specific kernels.
@@ -482,19 +461,76 @@ end
 
 Ratio between the centered factor of `Y` and the centered factor of its parent.
 """
-function transfer_factor(K,x,Y::SourceTree)
+function transfer_factor(K,x,Y)
     yparent = parent(Y)
-    return centered_factor(K,x,Y)/centered_factor(K,x,yparent)
+    return inv_centered_factor(K,x,yparent)*centered_factor(K,x,Y)
+end
+
+function estimate_interpolation_order(kernel,partition,ds_func,tol,p)
+    @timeit_debug "estimate interpolation order" begin
+        nboxes = 20
+        # pick N random nodes at each deepest level and estimate the interpolation
+        # error by looking at the last chebyshev coefficients
+        # for nodes in partition
+        nodes = partition[end]
+        n  = length(nodes)
+        Δn = n ÷ nboxes
+        for i in 1:Δn:n
+            node = nodes[i]
+            er = Inf
+            while er > tol
+                N = ambient_dimension(node)
+                ds   = ds_func(node)
+                ers   = estimate_interpolation_error(kernel,node,ds,p)
+                er,imax = findmax(ers)
+                @debug ers,p
+                if er > tol
+                    p = ntuple(N) do i
+                        i == imax ? p[i]+1 : p[i]
+                    end
+                end
+            end
+        end
+        # end
+        order = p .- 1
+    end
+    return order
+end
+
+function estimate_interpolation_error(kernel,node::SourceTree{N,T,V},ds,p) where {N,T,V}
+    lb     = SVector(sqrt(eps()),0,-π)
+    # lb     = SVector(sqrt(N)/(2N),0,-π)
+    ub     = SVector(sqrt(N)/N,π,π)
+    domain = HyperRectangle(lb,ub)
+    msh    = UniformCartesianMesh(domain; step = ds)
+    els    = ElementIterator(msh)
+    # pick a random cone
+    I      = CartesianIndex((1,1,1))
+    rec    = els[I]
+    s      = cheb2nodes(p,rec) # cheb points in parameter space
+    x      = map(si->interp2cart(si,node),s)
+    irange = 1:length(x)
+    vals   = zeros(V,p...)
+    Ypts   = root_elements(node)[node.index_range]
+    B      = 2*rand(V,length(Ypts)) .- 1
+    jrange = 1:length(B)
+    near_interaction!(vals,kernel,x,Ypts,B,irange,jrange)
+    for i in eachindex(x)
+        xi = x[i] # cartesian coordinate of node
+        vals[i] = inv_centered_factor(kernel,xi,node) * vals[i]
+    end
+    coefs = chebcoefs!(reshape(vals,p...))
+    ntuple(i->cheb_error_estimate(coefs,i),N)
 end
 
 function Base.show(io::IO,ifgf::IFGFOp)
-    println(io,"IFGFOperator of $(eltype(ifgf)) with range $(rowrange(ifgf)) × $(colrange(ifgf))")
+    println(io,"IFGFOp of $(eltype(ifgf)) with range $(rowrange(ifgf)) × $(colrange(ifgf))")
     ctree = source_tree(ifgf)
     nodes  = collect(PreOrderDFS(ctree))
     leaves = collect(Leaves(ctree))
-    println("\t number of nodes:                $(length(nodes))")
-    println("\t number of leaves:               $(length(leaves))")
-    println("\t number of active cones:         $(sum(x->length(active_cone_idxs(x)),nodes))")
-    println("\t maximum number of active cones: $(maximum(x->length(active_cone_idxs(x)),nodes))")
+    println(io,"\t number of nodes:                $(length(nodes))")
+    println(io,"\t number of leaves:               $(length(leaves))")
+    println(io,"\t number of active cones:         $(sum(x->length(active_cone_idxs(x)),nodes))")
+    println(io,"\t maximum number of active cones: $(maximum(x->length(active_cone_idxs(x)),nodes))")
 end
 Base.show(io::IO,::MIME"text/plain",ifgf::IFGFOp) = show(io,ifgf)

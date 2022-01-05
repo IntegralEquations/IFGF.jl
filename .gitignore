@@ -2,6 +2,7 @@
 *.jl.cov
 *.jl.mem
 /docs/build/
+/sandbox/
 /test/Manifest.toml
 /docs/Manifest.toml
 Manifest.toml

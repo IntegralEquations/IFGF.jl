@@ -36,9 +36,8 @@ end
     const SourceTree{N,T,V}
 
 Type alias for a `ClusterTree` of points (represented as `SVector{N,T}`) storing
-data of type [`SourceTreeDataLite{N,T,V}`](@ref). See the documentation of
-`ClusterTree` in [`WavePropBase`](https://github.com/WaveProp/WavePropBase.jl)
-for more information.
+data of type [`SourceTreeData{N,T,V}`](@ref). See the documentation of
+[`ClusterTree`](@ref) for more details.
 """
 const SourceTree{N,T,V} = ClusterTree{Vector{SVector{N,T}},HyperRectangle{N,T},SourceTreeData{N,T,V}}
 
