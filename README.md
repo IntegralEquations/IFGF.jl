@@ -91,8 +91,3 @@ The error should be smaller than the prescribed tolerance.
 
 See the [documentation](https://waveprop.github.io/IFGF.jl/dev/) for more
 details and examples.
-
-## References and related packages
-
-- [FMM3D](https://github.com/flatironinstitute/FMM3D)
-- [HMatrices.jl]
