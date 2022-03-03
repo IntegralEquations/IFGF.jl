@@ -253,7 +253,7 @@ and when it may be useful to provide faster versions of these methods.
     Maxwell's equations, given by
 
     ```math
-        K(\boldsymbol{x},\boldsymbol{y}) = \mathbb{G}(\boldsymbol{x},\boldsymbol{y}) = \mathbb{G}(\boldsymbol{x}, \boldsymbol{y})==\left(\mathbb{I}+\frac{\nabla_{\boldsymbol{x}} \nabla_{\boldsymbol{x}}}{k^{2}}\right) G(\boldsymbol{x}, \boldsymbol{y}),
+        K(\boldsymbol{x},\boldsymbol{y}) = \mathbb{G}(\boldsymbol{x}, \boldsymbol{y}) := \left(\mathbb{I}+\frac{\nabla_{\boldsymbol{x}} \nabla_{\boldsymbol{x}}}{k^{2}}\right) G(\boldsymbol{x}, \boldsymbol{y}),
     ```
 
     where ``k`` is a constant which depends on the electric permittivity, the
