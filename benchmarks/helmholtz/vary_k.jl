@@ -3,60 +3,35 @@ using IFGF
 using LinearAlgebra
 using StaticArrays
 using Random
-using Plots
-plotlyjs()
-Random.seed!(1)
 
-includet(joinpath(IFGF.PROJECT_ROOT,"test","testutils.jl"))
+include(joinpath(IFGF.PROJECT_ROOT,"test","testutils.jl"))
 
 # parameters
-p        = (4,4,4)
-ppw      = 20
-splitter = Trees.DyadicSplitter(;nmax=100)
+p        = (3,5,5)
+ppw      = 10 # point per wavelength
 T        = ComplexF64
-
-# specify the function to generate the point clouds
-pts_func = sphere_uniform_surface_mesh
+r        = 1 # sphere radius
+area     = 4π*r^2
+nmax     = 100
+Δs       = (0.5,π/2,π/2)
 
 # loop over wavenumbers
-kvec = [2π,2π,4π,8π,16π,32π]
-er   = []
-ta   = [] # assemble time
-tp   = [] # product time
-npts = []
+kvec = [2π,2π,4π,8π]
+# kvec = [2π,2π,4π,8π,16π,32π,64π]
+
 for k in kvec
-    ds_func  = IFGF.cone_domain_size_func(k,(1.0,1.0,1.0))
-    K    = HelmholtzKernel(k)
-    λ    = 2π/k
-    dx   = λ/ppw
-    Xpts = Ypts = pts_func(dx)
-    n    = length(Xpts)
-    push!(npts,n)
-    I   = rand(1:n,100)
-    B   = randn(T,n)
+    n        = ceil(Int,ppw^2*k^2*area/(4π^2))
+    K        = HelmholtzKernel(k)
+    Xpts = Ypts = sphere_uniform(n,r)
+    I   = collect(1:1000)
+    B   = ones(T,n)
     C   = zeros(T,n)
     exa = [sum(K( Xpts[i],Ypts[j])*B[j] for j in 1:n) for i in I]
-    tmp = @elapsed A  = IFGFOp(K,Xpts,Ypts;splitter,p,ds_func,threads=false)
-    push!(ta,tmp)
-    tmp = @elapsed mul!(C,A,B,1,0;threads=false)
-    push!(tp,tmp)
-    ee = norm(C[I]-exa,2) / norm(exa,2)
-    push!(er,ee)
+    ta  = @elapsed A = assemble_ifgf(K,Xpts,Ypts;nmax,order=p.-1,Δs,threads=true)
+    tp = @elapsed mul!(C,A,B,1,0;threads=true)
+    er = norm(C[I]-exa,2) / norm(exa,2)
+    println("="^80)
+    println(A)
+    println("lambda=$(2*pi/k),N=$n,checksum=$(exa[1]),tassemble = $ta, tprod=$tp,
+    error=$er")
 end
-
-fig = plot(npts[2:end],ta[2:end],m=:circle,
-    ylabel="time (s)",
-    xlabel="N",
-    yscale=:log10,
-    xscale=:log10,
-    label="precomputation")
-plot!(npts[2:end],tp[2:end],m=:cross,label="forward map")
-# add a reference slop
-p1 = 1
-p2 = 2
-b  = 4
-yy = @. npts[2:end]^p1 * log(b,npts[2:end])^p2*tp[end]/(npts[end]^p1*log(b,npts[end])^p2)
-plot!(npts[2:end],yy,ls=:dash,label="loglinear slope")
-
-dir = @__DIR__
-savefig(fig,joinpath(dir,"sphere_k_scaling.png"))

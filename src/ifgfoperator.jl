@@ -83,6 +83,7 @@ function assemble_ifgf(kernel,Xpoints,Ypoints;
                 threads = true)
 
     splitter = CardinalitySplitter(nmax)
+    # splitter = DyadicSplitter(nmax)
     k        = wavenumber(kernel)
     ds_func  = cone_domain_size_func(k,Δs)
     # infer the type of the matrix, then compute the type of density to be
@@ -528,6 +529,8 @@ function Base.show(io::IO,ifgf::IFGFOp)
     ctree = source_tree(ifgf)
     nodes  = collect(PreOrderDFS(ctree))
     leaves = collect(Leaves(ctree))
+    d = length(ifgf._source_tree_depth_partition) - 1
+    println(io,"\t tree depth:                     $d")
     println(io,"\t number of nodes:                $(length(nodes))")
     println(io,"\t number of leaves:               $(length(leaves))")
     println(io,"\t number of active cones:         $(sum(x->length(active_cone_idxs(x)),nodes))")

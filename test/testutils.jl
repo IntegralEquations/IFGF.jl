@@ -14,6 +14,24 @@ function cube_uniform_surface_mesh(dx)
     return pts
 end
 
+function spheroid(N,r,center,zstretch)
+    pts   = Vector{Geometry.Point3D}(undef,N)
+    phi   = π*(3-sqrt(5)) # golden angle in radians
+    for i = 1:N
+        ytmp   = 1 - ((i-1)/(N-1))*2
+        radius = sqrt(1-ytmp^2)
+        theta    = phi*i
+        x = cos(theta) * radius * r + center[1]
+        y = ytmp * r + center[2]
+        z = zstretch * sin(theta) * radius * r + center[3]
+        pts[i] = SVector(x,y,z)
+    end
+    # Output
+    return pts
+end
+
+sphere_uniform(N,r,center=(0,0,0)) = spheroid(N,r,center,1)
+
 function cube_nonuniform_surface_mesh(dx,p=2)
     geo = ParametricSurfaces.Cube() # a cube with low corner at (0,0,0) and high corner (2,2,2)
     range = -1+dx/2:dx:1-dx/2
