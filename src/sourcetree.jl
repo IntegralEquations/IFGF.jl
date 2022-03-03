@@ -285,8 +285,8 @@ function element_index(s::SVector{N},m::UniformCartesianMesh{N}) where {N}
     els = ElementIterator(m)
     sz = size(els)
     Δs = step(m)
-    lc = svector(i -> m.grids[i].start, N)
-    uc = svector(i -> m.grids[i].stop, N)
+    lc = low_corner(m)
+    uc = high_corner(m)
     # assert that lc <= s <= uc?
     # @assert all(lc .<= s .<= uc)
     I = ntuple(N) do n
