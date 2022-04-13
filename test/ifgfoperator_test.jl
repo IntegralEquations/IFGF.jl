@@ -19,7 +19,7 @@ IFGF.wavenumber(::typeof(K)) = 0
         B_mat = rand(ny,nz)
         C     = zeros(nx)
         A     = assemble_ifgf(K,Xpts,Ypts;order=p,nmax=250)
-        mul!(C,A,B)
+        mul!(C,A,B,1,0,threads=false)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
         # @test A*B_mat ≈ A_mat*B_mat
@@ -35,7 +35,7 @@ IFGF.wavenumber(::typeof(K)) = 0
         B_mat = rand(ny,nz)
         C     = zeros(nx)
         A     = assemble_ifgf(K,Xpts,Ypts;order=p,nmax=100)
-        mul!(C,A,B)
+        mul!(C,A,B,1,0,threads=false)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
         # @test A*B_mat ≈ A_mat*B_mat
@@ -54,7 +54,7 @@ end
         B_mat = rand(ny,nz)
         C     = zeros(nx)
         A     = assemble_ifgf(K,Xpts,Ypts;order=p,nmax=250)
-        mul!(C,A,B)
+        mul!(C,A,B,1,0,threads=false)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
         # @test A*B_mat ≈ A_mat*B_mat
@@ -70,7 +70,7 @@ end
         B_mat = rand(ny,nz)
         C     = zeros(nx)
         A     = assemble_ifgf(K,Xpts,Ypts;order=p,nmax=100)
-        mul!(C,A,B)
+        mul!(C,A,B,1,0;threads=false)
         @test size(A) == (nx,ny)
         @test C ≈ A_mat*B
         # @test A*B_mat ≈ A_mat*B_mat
@@ -89,10 +89,10 @@ end
     C     = zeros(nx)
     A     = assemble_ifgf(K,Xpts,Ypts;order=p,nmax=50)
     bytes_before = Base.summarysize(A)
-    mul!(C,A,B)
+    mul!(C,A,B,1,0;threads=false)
     @test size(A) == (nx,ny)
     @test C ≈ A_mat*B
-    @test C == mul!(C,A,B) # recompute to verify that the result does not change
+    @test C == mul!(C,A,B,1,0;threads=false) # recompute to verify that the result does not change
     @test bytes_before == Base.summarysize(A)
     #@test A*B_mat ≈ A_mat*B_mat
 end
