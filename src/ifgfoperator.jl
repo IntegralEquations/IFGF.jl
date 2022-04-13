@@ -85,7 +85,7 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     threads= true)
 
     splitter = CardinalitySplitter(nmax)
-    k = wavenumber(kernel)
+    k        = wavenumber(kernel)
     ds_func = cone_domain_size_func(k, Δs)
     # infer the type of the matrix, then compute the type of density to be
     # interpolated
@@ -110,8 +110,12 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     # create an fftw plan for the chebtransform. Since `Tv` may be an `SVector`, we plan on
     # its element type and perform the FFT on each component
     plan = FFTW.plan_r2r!(zeros(eltype(Tv), p), FFTW.REDFT00; flags=FFTW.PATIENT | FFTW.UNALIGNED)
-    _compute_interaction_list!(source_tree, target_tree, adm)
-    _compute_cone_list!(partition, Xpoints, Val(p), ds_func, threads)
+    @timeit_debug "interaction list computation" begin
+        _compute_interaction_list!(source_tree, target_tree, adm)
+    end
+    @timeit_debug "cone list computation" begin
+        _compute_cone_list!(partition, Xpoints, Val(p), ds_func, threads)
+    end
       # preallocate buffers for holding all interpolation values/coefs and decide
     # which memory is "owned" by each cone
     buffers = _allocate_buffers!(partition,prod(p),Tv)
@@ -303,7 +307,7 @@ function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOp, x::AbstractVector, a::
     K = kernel(A)
     partition = A._source_tree_depth_partition
     if threads
-        _gemv_threaded!(y, K, rtree, partition, x, T, Val(A.p),A.plan)
+        _gemv_threaded!(y, K, rtree, partition, x, T, Val(A.p),A.plan,A.buffers)
     else
         _gemv!(y, K, rtree, partition, x, T, Val(A.p),A.plan,A.buffers)
     end
@@ -333,6 +337,7 @@ function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) wh
             else
                 @timeit_debug "M2M" _moments_to_moments!(node, K, B, p, plan, buffer, cbuffer)
             end
+            _chebtransform!(node, p, plan, buffer)
             @timeit_debug "M2P" _moments_to_particles!(C, K, target_tree, node, p, buffer)
             @timeit_debug "P2P" _particles_to_particles!(C, K, target_tree, node, B, node)
         end
@@ -340,32 +345,32 @@ function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) wh
     end
 end
 
-function _gemv_threaded!(C, K, target_tree, partition, B, T, p::Val{P}, plan) where {P}
-    # the threading strategy is to create `nt` copies of the output vector, and
-    # for each depth thread all nodes on that depth with the local version of
-    # the output vector.
+function _gemv_threaded!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) where {P}
+    buffer,cbuffer = buffers
+    fill!(buffer,zero(eltype(buffer)))
+    fill!(buffer,zero(eltype(cbuffer)))
     nt = Threads.nthreads()
     Cthreads = [zero(C) for _ in 1:nt]
     for depth in Iterators.reverse(partition)
+        fill!(buffer,zero(eltype(buffer)))
         Threads.@threads for node in depth
-            length(node) == 0 && continue
             id = Threads.threadid()
+            length(node) == 0 && continue
             if isleaf(node)
-                _particles_to_moments!(node, K, B, p, plan)
+                @timeit_debug "P2M" _particles_to_moments!(node, K, B, p, plan, buffer)
             else
-                _moments_to_moments!(node, K, B, p, plan)
+                @timeit_debug "M2M" _moments_to_moments!(node, K, B, p, plan, buffer, cbuffer)
             end
-            _moments_to_particles!(Cthreads[id], K, target_tree, node, p)
-            _particles_to_particles!(Cthreads[id], K, target_tree, node, B, node)
+            _chebtransform!(node, p, plan, buffer)
+            @timeit_debug "M2P" _moments_to_particles!(Cthreads[id], K, target_tree, node, p, buffer)
+            @timeit_debug "P2P" _particles_to_particles!(Cthreads[id], K, target_tree, node, B, node)
         end
+        cbuffer, buffer = buffer, cbuffer
     end
     # reduction stage
     for i in 1:nt
         axpy!(1, Cthreads[i], C)
     end
-    # since root has not parent, it must free its own interpolation data
-    root = partition[1] |> first
-    free_interpolant_data!(root)
 end
 
 function _moments_to_moments!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buff, cbuff) where {N,Td,P}
@@ -384,6 +389,13 @@ function _moments_to_moments!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buf
                 vals[i] += transfer_factor(K, x[i], chd) * chebeval(coefs, si, rec, p)
             end
         end
+    end
+    return node
+end
+
+function _chebtransform!(node::SourceTree{N,Td}, ::Val{P}, plan, buff) where {N,Td,P}
+    for I in active_cone_idxs(node)
+        vals = view(buff,conedata(node,I))
         # transform vals to coefs in place. Coefs will be used later when the
         # current node transfers its expansion to its parent
         coefs = chebcoefs!(reshape(vals,P...), plan)
@@ -405,7 +417,6 @@ function _particles_to_moments!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, b
             xi = x[i] # cartesian coordinate of node
             vals[i] = inv_centered_factor(K, xi, node) * vals[i]
         end
-        coefs = chebcoefs!(reshape(vals,P...), plan)
     end
     return node
 end
