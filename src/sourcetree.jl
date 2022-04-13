@@ -16,20 +16,20 @@ interpolated.
     interpolation
 - `nearlist`: nodes on the target tree that must be evaluated by a direct sum.
 """
-mutable struct SourceTreeData{N,T,V}
+mutable struct SourceTreeData{N,T}
     msh::UniformCartesianMesh{N,T}
-    conedatadict::Dict{CartesianIndex{N},Union{Array{V,N},Nothing}}
+    conedatadict::Dict{CartesianIndex{N},UnitRange{Int64}}
     farlist::Vector{TargetTree{N,T}}
     nearlist::Vector{TargetTree{N,T}}
 end
 
-function SourceTreeData{N,T,V}() where {N,T,V}
+function SourceTreeData{N,T}() where {N,T}
     domain       = HyperRectangle{N,T}(ntuple(i->0,N),ntuple(i->0,N))
     msh          = UniformCartesianMesh(domain, ntuple(i->1,N))
-    conedict     = Dict{CartesianIndex{N},Union{Array{V,N},Nothing}}()
+    conedict     = Dict{CartesianIndex{N},UnitRange{Int64}}()
     farlist      = Vector{TargetTree{N,T}}()
     nearlist     = Vector{TargetTree{N,T}}()
-    return SourceTreeData{N,T,V}(msh, conedict, farlist, nearlist)
+    return SourceTreeData{N,T}(msh, conedict, farlist, nearlist)
 end
 
 """
@@ -39,7 +39,7 @@ Type alias for a `ClusterTree` of points (represented as `SVector{N,T}`) storing
 data of type [`SourceTreeData{N,T,V}`](@ref). See the documentation of
 [`ClusterTree`](@ref) for more details.
 """
-const SourceTree{N,T,V} = ClusterTree{Vector{SVector{N,T}},HyperRectangle{N,T},SourceTreeData{N,T,V}}
+const SourceTree{N,T} = ClusterTree{Vector{SVector{N,T}},HyperRectangle{N,T},SourceTreeData{N,T}}
 
 # getters for SourceTree
 msh(t::SourceTree)                            = t.data.msh
@@ -51,45 +51,6 @@ WavePropBase.center(t::SourceTree)            = t |> container |> center
 cone_domains(t::SourceTree)                   = msh(t) |> ElementIterator # iterator of HyperRectangles
 cone_domain(t::SourceTree, I::CartesianIndex) = cone_domains(t)[I]
 conedata(t::SourceTree,I::CartesianIndex)    = conedatadict(t)[I]
-density_type(::SourceTree{N,T,V}) where {N,T,V} = V
-
-"""
-    allocate_interpolant_data!(node::SourceTree,::Val{P},[I])
-
-Allocate the memory necessary to construct the `I` cone interpolant of `node`
-with `P` points, where `P` is a tuple of integers. If `I` is absent, allocate
-data for *all* cone interpolants of `node`.
-"""
-function allocate_interpolant_data!(node::SourceTree,::Val{P},I) where {P}
-    V       = density_type(node)
-    dict    = conedatadict(node)
-    dict[I] = zeros(V,P)
-end
-function allocate_interpolant_data!(node::SourceTree,p::Val{P}) where {P}
-    for I in active_cone_idxs(node)
-        allocate_interpolant_data!(node,p,I)
-    end
-    return node
-end
-
-"""
-    free_interpolant_data!(node,[I])
-
-
-Free the memory used to store the `I` cone interpolant of `node`. If `I` is
-absent, free data associated to *all* cone interpolants of `node`
-"""
-function free_interpolant_data!(node::SourceTree,I::CartesianIndex)
-    dict    = conedatadict(node)
-    dict[I] = nothing
-    return node
-end
-function free_interpolant_data!(node::SourceTree)
-    for I in active_cone_idxs(node)
-        free_interpolant_data!(node,I)
-    end
-    return node
-end
 
 # setters
 _addtofarlist!(s::SourceTree, t::TargetTree)  = push!(farlist(s), t)
@@ -103,7 +64,7 @@ If `node` does not contain cone `I`, add it to the `conedict`.
 function _addnewcone!(node::SourceTree, idxcone, ::Val{P}) where {P}
     cd = conedatadict(node)
     if !haskey(cd, idxcone)
-        push!(cd, idxcone => nothing)
+        push!(cd, idxcone => -1:-1)
     end
     return node
 end
@@ -214,8 +175,8 @@ constructor (i.e. `data = SourceTreeData()`).
 - `Xdatatype`: type container of target points.
 - `Vdatatype`: type of value stored at interpolation nodes
 """
-function initialize_source_tree(; Ypoints::Vector{SVector{N,T}}, splitter, Vdatatype) where {N,T}
-    source_tree_datatype = SourceTreeData{N,T,Vdatatype}
+function initialize_source_tree(; Ypoints::Vector{SVector{N,T}}, splitter) where {N,T}
+    source_tree_datatype = SourceTreeData{N,T}
     source_tree = ClusterTree{source_tree_datatype}(Ypoints, splitter)
     return source_tree
 end
