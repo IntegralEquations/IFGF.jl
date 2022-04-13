@@ -290,6 +290,14 @@ function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOp, x::AbstractVector, a::
     return y
 end
 
+function LinearAlgebra.mul!(y::AbstractMatrix, A::IFGFOp, x::AbstractMatrix, a::Number, b::Number; global_index=true, threads=true)
+    ncol = size(x,2)
+    for i in 1:ncol
+        mul!(view(y,:,i),A,view(x,:,i),a,b;global_index,threads)
+    end
+    return y
+end
+
 function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan) where {P}
     for depth in Iterators.reverse(partition)
         for node in depth
