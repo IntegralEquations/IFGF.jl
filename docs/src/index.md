@@ -98,8 +98,8 @@ available options. Note that `L`, while not as compact as `A`, still has a
 relatively light memory footprint:
 
 ```@example helmholtz-simple
-mbytes = Base.summarysize(L) / 1e6
-print("Size of L: $mbytes megabytes")
+gb = Base.summarysize(L) / 1e9
+print("Size of L: $gb gigabytes")
 ```
 
 !!! info

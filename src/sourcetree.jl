@@ -47,7 +47,7 @@ conedatadict(t::SourceTree)                   = t.data.conedatadict
 active_cone_idxs(t::SourceTree)               = keys(conedatadict(t))
 farlist(t::SourceTree)                        = t.data.farlist
 nearlist(t::SourceTree)                       = t.data.nearlist
-WavePropBase.center(t::SourceTree)            = t |> container |> center
+center(t::SourceTree)            = t |> container |> center
 cone_domains(t::SourceTree)                   = msh(t) |> ElementIterator # iterator of HyperRectangles
 cone_domain(t::SourceTree, I::CartesianIndex) = cone_domains(t)[I]
 conedata(t::SourceTree,I::CartesianIndex)    = conedatadict(t)[I]
@@ -192,7 +192,7 @@ function compute_interpolation_domain(source::SourceTree{N,Td},::Val{P}) where {
     ub = svector(i->typemin(Td),N) # upper bound
     # nodes on far_list
     for far_target in farlist(source)
-        for x in Trees.elements(far_target) # target points
+        for x in elements(far_target) # target points
             s  = cart2interp(x,source)
             lb = min.(lb,s)
             ub = max.(ub,s)

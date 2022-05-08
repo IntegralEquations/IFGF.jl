@@ -32,8 +32,8 @@ struct IFGFOp{T} <: AbstractMatrix{T}
 end
 
 # getters
-rowrange(ifgf::IFGFOp)         = Trees.index_range(ifgf.target_tree)
-colrange(ifgf::IFGFOp)         = Trees.index_range(ifgf.source_tree)
+rowrange(ifgf::IFGFOp)         = index_range(ifgf.target_tree)
+colrange(ifgf::IFGFOp)         = index_range(ifgf.source_tree)
 kernel(op::IFGFOp)             = op.kernel
 target_tree(op::IFGFOp)        = op.target_tree
 source_tree(op::IFGFOp)        = op.source_tree
@@ -98,7 +98,7 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     @timeit_debug "source tree initialization" begin
         source_tree = initialize_source_tree(; Ypoints, splitter)
     end
-    partition = Trees.partition_by_depth(source_tree)
+    partition = partition_by_depth(source_tree)
     @timeit_debug "target tree initialization" begin
         target_tree = initialize_target_tree(; Xpoints, splitter)
     end
@@ -269,7 +269,7 @@ function _initialize_cone_interpolants!(source::SourceTree{N}, X, p::Val{P}, ds_
     end
     # initialize all cones needed to cover far field.
     for far_target in farlist(source)
-        for x in Trees.elements(far_target) # target points
+        for x in elements(far_target) # target points
             I, _ = cone_index(x, source)
             _addnewcone!(source, I, p)
         end
@@ -542,9 +542,12 @@ function estimate_interpolation_error(kernel, node::SourceTree{N,T}, ds, p) wher
     s = cheb2nodes(p, rec) # cheb points in parameter space
     x = map(si -> interp2cart(si, node), s)
     irange = 1:length(x)
-    vals = zeros(V, p...)
+    Tk = hasmethod(return_type, Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel, eltype(x), eltype(x))
+    assert_concrete_type(Tk)
+    Tv = _density_type_from_kernel_type(Tk)
+    vals = zeros(Tv, p...)
     Ypts = root_elements(node)[node.index_range]
-    B = 2 * rand(V, length(Ypts)) .- 1
+    B = 2 * rand(Tv, length(Ypts)) .- 1
     jrange = 1:length(B)
     near_interaction!(vals, kernel, x, Ypts, B, irange, jrange)
     for i in eachindex(x)
@@ -558,8 +561,8 @@ end
 function Base.show(io::IO, ifgf::IFGFOp)
     println(io, "IFGFOp of $(eltype(ifgf)) with range $(rowrange(ifgf)) × $(colrange(ifgf))")
     ctree = source_tree(ifgf)
-    nodes = collect(PreOrderDFS(ctree))
-    leaves = collect(Leaves(ctree))
+    nodes = collect(AbstractTrees.PreOrderDFS(ctree))
+    leaves = collect(AbstractTrees.Leaves(ctree))
     println(io, "\t number of nodes:                $(length(nodes))")
     println(io, "\t number of leaves:               $(length(leaves))")
     println(io, "\t number of active cones:         $(sum(x->length(active_cone_idxs(x)),nodes))")
