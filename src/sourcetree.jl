@@ -18,7 +18,7 @@ interpolated.
 """
 mutable struct SourceTreeData{N,T}
     msh::UniformCartesianMesh{N,T}
-    conedatadict::Dict{CartesianIndex{N},UnitRange{Int64}}
+    conedatadict::OrderedDict{CartesianIndex{N},UnitRange{Int64}}
     farlist::Vector{TargetTree{N,T}}
     nearlist::Vector{TargetTree{N,T}}
 end
@@ -26,7 +26,7 @@ end
 function SourceTreeData{N,T}() where {N,T}
     domain       = HyperRectangle{N,T}(ntuple(i->0,N),ntuple(i->0,N))
     msh          = UniformCartesianMesh(domain, ntuple(i->1,N))
-    conedict     = Dict{CartesianIndex{N},UnitRange{Int64}}()
+    conedict     = OrderedDict{CartesianIndex{N},UnitRange{Int64}}()
     farlist      = Vector{TargetTree{N,T}}()
     nearlist     = Vector{TargetTree{N,T}}()
     return SourceTreeData{N,T}(msh, conedict, farlist, nearlist)
@@ -198,7 +198,7 @@ function compute_interpolation_domain(source::SourceTree{N,Td},::Val{P}) where {
             ub = max.(ub,s)
         end
     end
-    refnodes = cheb2nodes(P)
+    refnodes = chebnodes(P)
     if !isroot(source)
         source_parent = parent(source)
         for I in active_cone_idxs(source_parent)

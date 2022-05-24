@@ -15,9 +15,9 @@
 # (d) statically compute the reference tensor-product chebnodes given the order
 
 """
-    cheb2nodes(n,[domain])
-    cheb2nodes(p::NTuple,[domain])
-    cheb2nodes(::Val{P},[domain])
+    chebnodes(n,[domain])
+    chebnodes(p::NTuple,[domain])
+    chebnodes(::Val{P},[domain])
 
 Return the `n` Chebyshev nodes of the second kind on the interval `[-1,1]`.
 
@@ -33,21 +33,21 @@ it.
 lb = (0.,0.)
 ub = (3.,2.)
 domain = HyperRectangle(lb,ub)
-cheb2nodes((10,5),domain) # generate `10×5` Chebyshev nodes on the `[0,3]×[0,2]` rectangle.
+chebnodes((10,5),domain) # generate `10×5` Chebyshev nodes on the `[0,3]×[0,2]` rectangle.
 ```
 """
-function cheb2nodes(n)
+function chebnodes(n)
     [cos((i-1)*π /(n-1)) for i in 1:n]
 end
 
-function cheb2nodes(p::NTuple)
-    nodes1d = map(i->cheb2nodes(i),p)
+function chebnodes(p::NTuple)
+    nodes1d = map(i->chebnodes(i),p)
     iter    = Iterators.product(nodes1d...)
     return iter
 end
 
-@generated function cheb2nodes(::Val{P}) where {P}
-    nodes1d = map(i->cheb2nodes(i),P)
+@generated function chebnodes(::Val{P}) where {P}
+    nodes1d = map(i->chebnodes(i),P)
     iter    = Iterators.product(nodes1d...)
     nodes   = SVector.(collect(iter))
     if prod(P) < 1e3
@@ -56,33 +56,42 @@ end
     return :($nodes)
 end
 
-function cheb2nodes(p::Val{P},rec::HyperRectangle) where {P}
-    refnodes = cheb2nodes(p)
+function chebnodes(p::Val{P},rec::HyperRectangle) where {P}
+    refnodes = chebnodes(p)
     lc,hc    = low_corner(rec), high_corner(rec)
     c0       = (lc+hc)/2
     c1       = (hc-lc)/2
     map(x-> c0 + c1.*x,refnodes)
 end
 
-function cheb2nodes(p::NTuple,rec::HyperRectangle)
-    refnodes = cheb2nodes(p)
+function chebnodes(p::NTuple,rec::HyperRectangle)
+    refnodes = chebnodes(p)
     lc,hc    = low_corner(rec), high_corner(rec)
     c0       = (lc+hc)/2
     c1       = (hc-lc)/2
     map(x-> c0 + c1.*x,refnodes)
 end
 
-function chebcoefs!(vals::AbstractArray)
+"""
+    chebcoefs!(vals::AbstractArray[, plan])
+
+Given a function values on the `chebnodes(p)`, where `p=size(vals)`, compute
+the Chebyshev coefficients in-place. The underlying implementation uses the
+`FFTW` library. A pre-computed `plan::FFTW.FFTWPlan` should be passed for
+efficiency.
+
+## See also: [`chebnodes`](@ref)
+"""
+function chebtransform_fftw!(vals::AbstractArray)
     plan = FFTW.plan_r2r!(copy(vals),FFTW.REDFT00)
-    chebcoefs!(vals,plan)
+    chebtransform_fftw!(vals,plan)
 end
 
-function chebcoefs!(vals::AbstractArray{<:Number,N},plan::FFTW.FFTWPlan) where {N}
+function chebtransform_fftw!(vals::AbstractArray{<:Number,N},plan::FFTW.FFTWPlan) where {N}
     FFTW.mul!(vals,plan,vals) # type-I DCT
     # renormalize the result to obtain the conventional
     # Chebyshev-polnomial coefficients
     s = size(vals)
-    # coefs ./= prod(n -> 2(n-1), s)
     scale = 2^N/prod(n -> 2(n-1), s)
     @. vals *= scale
     for dim = 1:N
@@ -94,17 +103,80 @@ function chebcoefs!(vals::AbstractArray{<:Number,N},plan::FFTW.FFTWPlan) where {
     return vals
 end
 
-function chebcoefs!(vals::AbstractArray{<:SVector{K}},plan) where {K}
-    coefs = ntuple(i -> chebcoefs!([v[i] for v in vals],plan), Val{K}())
+function chebtransform_fftw!(vals::AbstractArray{<:SVector{K}},plan) where {K}
+    coefs = ntuple(i -> chebtransform_fftw!([v[i] for v in vals],plan), Val{K}())
     copyto!(vals,SVector{K}.(coefs...))
 end
 
-@fastmath function chebeval(coefs,x::SVector{N,<:Real},rec::HyperRectangle,sz::Val{SZ}) where {N,SZ}
-    x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
-    return evaluate(x0, coefs, Val{N}(), 1, length(coefs),sz)
+"""
+    chebcoefs_native!(vals)
+
+Compute the Chebyshev coefficients given the values of a function on the
+Chebyshev nodes of the second kind (i.e. the extrema of the Chebyshev
+polynomials `Tₙ`). The  result is written in-place.
+
+## See also: [`chebcoefs!`](@ref)
+"""
+function chebtransform_native!(vals,buff=copy(vals))
+    D  = ndims(vals)
+    if D === 1
+        # base case
+        chebtransform1d!(vals,buff)
+    else
+        # recurse on N-1 dimensional slices
+        inds_after = ntuple(Returns(:),D-1)
+        for i in 1:size(vals,1)
+            v = view(vals,i,inds_after...)
+            b = view(buff,i,inds_after...)
+            chebtransform_native!(v,b)
+        end
+        copy!(buff,vals)
+        # finally do the first (contiguous) dimension
+        vals1d = reshape(vals,size(vals,1),:)
+        buff1d = reshape(buff,size(vals,1),:)
+        for (v,b) in zip(eachcol(vals1d),eachcol(buff1d))
+            chebtransform_native!(v,b)
+        end
+    end
+    return vals
 end
 
-@fastmath function evaluate(x::SVector{N}, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {N,dim,SZ}
+function chebtransform1d!(coefs,vals)
+    N = length(vals)
+    # DCT-I transform
+    @inbounds for m in 0:N-1
+        coefs[m+1] = 1/2*(vals[1] + (-1)^m*vals[N])
+        for n in 1:N-2
+            coefs[m+1] += vals[n+1]*cos(π*m*n/(N-1))
+        end
+        coefs[m+1] *= 2/(N-1)
+    end
+    # rescale coefs
+    coefs[1] /= 2
+    coefs[end] /= 2
+    return coefs
+end
+chebtransform1d!(vals) = chebtransform1d!(vals,copy(vals))
+
+"""
+    chebeval(coefs,x,rec[,sz])
+
+Evaluate the Chebyshev polynomial defined on `rec` with coefficients given by
+`coefs` at the point `x`. If the size of `coefs` is known statically, its size
+can be passed as a `Val` using the `sz` argument.
+"""
+@fastmath function chebeval_novec(coefs,x::SVector{N,<:Real},rec::HyperRectangle,sz::Val{SZ}) where {N,SZ}
+    x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
+    return _evaluate(x0, coefs, Val{N}(), 1, length(coefs),sz)
+end
+
+#=
+Adapted from `FastChebInterp` to focus on speed for small orders `p`. The coefs
+in the IFGF algorithm is typically a view of some larger array which is reused
+at different levels of the algorithn. We then pass the size of the coefficients
+statically which allows for various improvements by the compiler (like loop unrolling).
+=#
+@inline @fastmath function _evaluate(x, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {dim,SZ}
     @inbounds n = SZ[dim]
     @inbounds xd = x[dim]
     if dim == 1
@@ -127,21 +199,110 @@ end
         # since earlier dimensions are contiguous
         dim′ = Val{dim-1}()
 
-        c₁ = evaluate(x, c, dim′, i1, Δi,sz)
+        c₁ = _evaluate(x, c, dim′, i1, Δi,sz)
         if n ≤ 2
             n == 1 && return c₁ + one(xd) * zero(c₁)
-            c₂ = evaluate(x, c, dim′, i1+Δi, Δi, sz)
+            c₂ = _evaluate(x, c, dim′, i1+Δi, Δi, sz)
             return c₁ + xd*c₂
         end
-        cₙ₋₁ = evaluate(x, c, dim′, i1+(n-2)*Δi, Δi,sz)
-        cₙ = evaluate(x, c, dim′, i1+(n-1)*Δi, Δi,sz)
+        cₙ₋₁ = _evaluate(x, c, dim′, i1+(n-2)*Δi, Δi,sz)
+        cₙ = _evaluate(x, c, dim′, i1+(n-1)*Δi, Δi,sz)
         bₖ = muladd(2xd, cₙ, cₙ₋₁)
         bₖ₊₁ = oftype(bₖ, cₙ)
         for j = n-3:-1:1
-            cⱼ = evaluate(x, c, dim′, i1+j*Δi, Δi,sz)
+            cⱼ = _evaluate(x, c, dim′, i1+j*Δi, Δi,sz)
             bⱼ = muladd(2xd, bₖ, cⱼ) - bₖ₊₁
             bₖ, bₖ₊₁ = bⱼ, bₖ
         end
         return muladd(xd, bₖ, c₁) - bₖ₊₁
     end
 end
+
+@inline @fastmath function chebeval_vec(coefs,x::SVector{N,<:Real},rec::HyperRectangle,sz::Val{SZ}) where {N,SZ}
+    N == 1 && (return chebeval_novec(coefs,x,rec,sz))
+    x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
+    return _evaluate_vec(x0.data, coefs, sz)
+end
+
+@inline function _evaluate_vec(x::NTuple,coeffs,::Val{SZ}) where {SZ}
+	N      = length(x)
+	T      = eltype(coeffs)
+	coeffs = reinterpret(SVector{SZ[1],T},coeffs)
+    f1d    = _evaluate(x[2:end], coeffs, Val{N-1}(), 1, length(coeffs), Val(SZ[2:end]))
+    _evaluate(x[1], f1d, Val{1}(), 1, length(SZ[1]), Val(SZ[1:1]))
+end
+
+# @fastmath function chebeval_vec(coefs,x::SVector{N,<:Real},rec::HyperRectangle,sz::Val{SZ}) where {N,SZ}
+#     x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
+#     T = eltype(coefs)
+#     buffers = ntuple(N-1) do d
+#         m = prod(SZ[1:d])
+#         b1 = @MArray zeros(T,m)
+#         b2 = @MArray zeros(T,m)
+#         b1,b2
+#     end
+#     # return buffers
+#     return _evaluate_vec(x0.data, coefs, sz, buffers)
+# end
+
+# function _evaluate_vec(x::NTuple,c,sz::Val{SZ},buffers) where {SZ}
+#     dim  = length(SZ)
+#     n    = SZ[1]
+#     sz′  = Val(SZ[1:dim-1])
+#     m    = prod(SZ[1:dim-1])
+#     if dim === 1
+#         x  = x[1]
+#         c₁ = c[1]
+#         # 1d case adapted from code at `FastChebInterp`, MIT License
+#         if n ≤ 2
+#             n == 1 && return c₁
+#             return muladd(x, c[2], c₁)
+#         end
+#         bₖ   = muladd(2x, c[n], c[n-1])
+#         bₖ₊₁ = oftype(bₖ, c[n])
+#         for j = n-3:-1:1
+#             bⱼ = muladd(2x, bₖ, c[1+j]) - bₖ₊₁
+#             bₖ, bₖ₊₁ = bⱼ, bₖ
+#         end
+#         return muladd(x, bₖ, c₁) - bₖ₊₁
+#     else
+#         # bₖ   = @MArray zeros(T,m)
+#         # bₖ₊₁ = @MArray zeros(T,m)
+#         bₖ,bₖ₊₁ = buffers[dim-1]
+#         c̃  = _reduce_last(x[dim],c,sz,bₖ,(bₖ₊₁))
+#         return _evaluate_vec(x[1:end-1],c̃,sz′,buffers)
+#     end
+# end
+
+# # sum over the last dimension of c, returning an abstract array of with size =
+# # size(c)[1:end-1]
+# function _reduce_last(x,c,sz::Val{SZ},bₖ,bₖ₊₁) where {SZ}
+#     n = SZ[end]
+#     m = prod(SZ[1:end-1])
+#     @inbounds bₖ₊₁ = copy!(bₖ₊₁,view(c,(n-1)*m+1:n*m))
+#     Δi   = (n-2)*m
+#     for i in 1:m
+#         @inbounds bₖ[i] = 2x*bₖ₊₁[i] + c[Δi+i]
+#     end
+#     for j = n-3:-1:1
+#         Δi = j*m
+#         for i in 1:m
+#             @inbounds bₖ₊₁[i] = muladd(2x,bₖ[i],c[Δi+i]) - bₖ₊₁[i]
+#         end
+#         bₖ, bₖ₊₁ = bₖ₊₁, bₖ
+#     end
+#     # last iteration
+#     for i in 1:m
+#         @inbounds bₖ₊₁[i] = muladd(x,bₖ[i],c[i]) - bₖ₊₁[i]
+#     end
+#     return bₖ₊₁
+# end
+
+# like selectdim(A,d=ndims(A),i)
+# selectlastdim(A::AbstractArray,i,sz) = selectdim(A,ndims(A),i)
+
+# function selectlastdim(c::AbstractVector,i::Int,sz::Val{SZ}) where {SZ}
+#     n = prod(SZ[1:end-1])
+#     idxs = (i*n-(n-1)):i*n
+#     view(c,idxs)
+# end

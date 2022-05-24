@@ -1,21 +1,13 @@
-using ParametricSurfaces # for generating some simple point distributions
 using LoopVectorization  # for automatically vectorizing some typical kernels
+using StaticArrays
+import WavePropBase as WPB
 
-# some point distributions for testing
-function cube_uniform_surface_mesh(dx)
-    geo = ParametricSurfaces.Cube() # a cube with low corner at (0,0,0) and high corner (2,2,2)
-    range = -1+dx/2:dx:1-dx/2
-    pts   = Vector{Geometry.Point3D}()
-    for ent in boundary(geo)
-        for u in range, v in range
-            push!(pts,ent((u,v)))
-        end
-    end
-    return pts
-end
+const Point3D = SVector{3,Float64}
+
+# some classical point distributions
 
 function spheroid(N,r,center,zstretch)
-    pts   = Vector{Geometry.Point3D}(undef,N)
+    pts   = Vector{Point3D}(undef,N)
     phi   = π*(3-sqrt(5)) # golden angle in radians
     for i = 1:N
         ytmp   = 1 - ((i-1)/(N-1))*2
@@ -32,43 +24,47 @@ end
 
 sphere_uniform(N,r,center=(0,0,0)) = spheroid(N,r,center,1)
 
-function cube_nonuniform_surface_mesh(dx,p=2)
-    geo = ParametricSurfaces.Cube() # a cube with low corner at (0,0,0) and high corner (2,2,2)
-    range = -1+dx/2:dx:1-dx/2
-    pts   = Vector{Geometry.Point3D}()
-    # degenerate change of variables mapping [0,1] onto itself with p
-    # derivatives vanishing at each endpoint
-    cov   = Integration.KressP(order=p)
-    # map cov to act on [-1,1]
-    χ     = (u) -> begin
-        û = 0.5*(u+1)
-        ŝ = cov(û)
-        s = 2*ŝ - 1
+function _cube(n,w,center=(0,0,0),order=0)
+    if order == 0
+        cov = identity
+    else
+        cov = WPB.KressP(;order=order)
     end
-    for ent in boundary(geo)
-        for u in range, v in range
-            push!(pts,ent((χ(u),χ(v))))
+    shift = Point3D(center) .- w/2
+    n1d    = ceil(Int,sqrt(n/6))
+    Δx = w/n1d
+    x1d = [w*cov(x/w) for x in range(Δx/2,w-Δx/2,n1d)]
+    pts = Point3D[]
+    for i in 1:n1d
+        for j in 1:n1d
+            # bottom
+            x = SVector(x1d[i],x1d[j],0) + shift
+            push!(pts,x)
+            # top
+            x = SVector(x1d[i],x1d[j],w) + shift
+            push!(pts,x)
+            # left
+            x = SVector(x1d[i],0,x1d[j]) + shift
+            push!(pts,x)
+            # right
+            x = SVector(x1d[i],w,x1d[j]) + shift
+            push!(pts,x)
+            # front
+            x = SVector(0,x1d[i],x1d[j]) + shift
+            push!(pts,x)
+            # back
+            x = SVector(w,x1d[i],x1d[j]) + shift
+            push!(pts,x)
         end
     end
     return pts
 end
 
-function cube_uniform_volume_mesh(dx)
-    range = dx/2:dx:1-dx/2
-    [SVector(a,b,c) for a in range, b in range, c in range] |> vec
-end
+cube_uniform(n,w,center=(0,0,0)) = _cube(n,w,center,0)
 
-function sphere_uniform_surface_mesh(dx)
-    geo   = ParametricSurfaces.Sphere(radius=1) # a sphere of radius 1 centered at (0,0,0)
-    range = -1+dx/2:dx:1-dx/2
-    pts   = Vector{Geometry.Point3D}()
-    for ent in boundary(geo)
-        for u in range, v in range
-            push!(pts,ent((u,v)))
-        end
-    end
-    return pts
-end
+cube_nonuniform(n,w,center=(0,0,0),order=2) = _cube(n,w,center,order)
+
+
 
 # define some typical kernels
 struct HelmholtzKernel
@@ -133,6 +129,8 @@ function (K::LaplaceKernel)(x,y)
     return (!iszero(d))*v
 end
 
+IFGF.wavenumber(K::LaplaceKernel) = 0
+
 function IFGF.near_interaction!(C,K::LaplaceKernel,X,Y,σ,I,J)
     Xm = reshape(reinterpret(Float64,X),3,:)
     Ym = reshape(reinterpret(Float64,Y),3,:)
@@ -189,28 +187,4 @@ IFGF.wavenumber(K::MaxwellKernel) = K.k
 #     d   = norm(x-yc)
 #     dp  = norm(x-yp)
 #     exp(im*K.k*(d-dp))*dp/d
-# end
-
-# function helmholtz3d_sl_vec!(C,X,Y,σ,k)
-#     m,n = size(X,2), size(Y,2)
-#     C_T = reinterpret(Float64, C)
-#     C_r = @views C_T[1:2:end,:]
-#     C_i = @views C_T[2:2:end,:]
-#     σ_T = reinterpret(Float64, σ)
-#     σ_r = @views σ_T[1:2:end,:]
-#     σ_i = @views σ_T[2:2:end,:]
-#     @turbo for j in 1:n
-#         for i in 1:m
-#             d2 = (X[1,i] - Y[1,j])^2
-#             d2 += (X[2,i] - Y[2,j])^2
-#             d2 += (X[3,i] - Y[3,j])^2
-#             d  = sqrt(d2)
-#             s, c = sincos(k * d)
-#             zr = inv(4π*d) * c
-#             zi = inv(4π*d) * s
-#             C_r[i] += (!iszero(d))*(zr*σ_r[j] - zi*σ_i[j])
-#             C_i[i] += (!iszero(d))*(zi*σ_r[j] + zr*σ_i[j])
-#         end
-#     end
-#     return C
 # end

@@ -2,11 +2,16 @@ module IFGF
 
 const PROJECT_ROOT =  pkgdir(IFGF)
 
+share_interp_data() = true
+use_fftw()          = true
+chebeval(args...)   = chebeval_novec(args...)
+
 using LinearAlgebra
 using StaticArrays
 using TimerOutputs
 using Printf
 using FFTW
+using OrderedCollections
 
 import AbstractTrees
 import WavePropBase
@@ -18,6 +23,7 @@ import WavePropBase:
     UniformCartesianMesh,
     center,
     CardinalitySplitter,
+    DyadicSplitter,
     return_type,
     assert_concrete_type,
     partition_by_depth,
@@ -37,7 +43,9 @@ import WavePropBase:
     root_elements,
     index_range,
     coords,
-    loc2glob
+    loc2glob,
+    decrement_index,
+    increment_index
 
 include("utils.jl")
 include("targettree.jl")

@@ -1,7 +1,7 @@
 using Test
 using IFGF
 using StaticArrays
-using IFGF: chebeval_novec, chebeval_vec, chebeval_vec1d, chebtransform_fftw!, chebtransform_native!, HyperRectangle
+using IFGF: chebeval_novec, chebeval_vec, chebeval_vec, chebtransform_fftw!, chebtransform_native!, HyperRectangle
 
 for T in (Float64, ComplexF64)
     for dim in 1:3
@@ -20,7 +20,7 @@ for T in (Float64, ComplexF64)
             rec = HyperRectangle(ntuple(i->-1.0,dim),ntuple(i->1.0,dim))
             SZ = Val(sz)
             v1 = chebeval_novec(c,x,rec,SZ)
-            v2 = chebeval_vec1d(c,x,rec,SZ)
+            v2 = chebeval_vec(c,x,rec,SZ)
             @test v1 ≈ v2
         end
 

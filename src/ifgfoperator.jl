@@ -77,14 +77,15 @@ The `adm` function gives a criterion to determine if the interaction between a
 target cell and a source cell should be computed using an interpolation scheme.
 """
 function assemble_ifgf(kernel, Xpoints, Ypoints;
-    nmax   = 100,
-    adm    = modified_admissibility_condition,
-    tol    = 1e-4,
-    order  = nothing,
-    Δs     = 1.0,
-    threads= true)
+    nmax    = 100,
+    adm     = modified_admissibility_condition,
+    tol     = 1e-4,
+    order   = nothing,
+    Δs      = 1.0,
+    threads = true,
+    splitter= DyadicSplitter(nmax)
+    )
 
-    splitter = CardinalitySplitter(nmax)
     k        = wavenumber(kernel)
     ds_func = cone_domain_size_func(k, Δs)
     # infer the type of the matrix, then compute the type of density to be
@@ -97,10 +98,12 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     # create source and target trees
     @timeit_debug "source tree initialization" begin
         source_tree = initialize_source_tree(; Ypoints, splitter)
+        prune!(source_tree)
     end
     partition = partition_by_depth(source_tree)
     @timeit_debug "target tree initialization" begin
         target_tree = initialize_target_tree(; Xpoints, splitter)
+        prune!(target_tree)
     end
     # if `order` is not passed explicitly, estimate it
     if order === nothing
@@ -122,6 +125,20 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     # call main constructor
     ifgf = IFGFOp{T}(kernel, target_tree, source_tree, p, ds_func, adm, plan, partition, buffers)
     return ifgf
+end
+
+function prune!(tree::ClusterTree)
+    isleaf(tree) && return tree
+    idxs = Int[]
+    for (i,chd) in enumerate(children(tree))
+        if length(chd) == 0
+            push!(idxs,i)
+        else
+            prune!(chd)
+        end
+    end
+    deleteat!(children(tree),idxs)
+    return tree
 end
 
 function _allocate_buffers!(partition,p,Tv)
@@ -168,20 +185,10 @@ function _compute_interaction_list!(source::SourceTree, target::TargetTree, adm)
         return nothing
     end
     # handle the various possibilities
-    if adm(target, source)
-        _addtofarlist!(source, target)
-    elseif isleaf(target) && isleaf(source)
+    if isleaf(target) || isleaf(source)
         _addtonearlist!(source, target)
-    elseif isleaf(target)
-        # recurse on children of source
-        for source_child in children(source)
-            _compute_interaction_list!(source_child, target, adm)
-        end
-    elseif isleaf(source)
-        # recurse on children of target
-        for target_child in children(target)
-            _compute_interaction_list!(source, target_child, adm)
-        end
+    elseif adm(target, source)
+        _addtofarlist!(source, target)
     else
         # TODO: when both have children, how to recurse down? Two strategies
         # below:
@@ -245,9 +252,9 @@ function _initialize_cone_interpolants!(source::SourceTree{N}, X, p::Val{P}, ds_
     domain = compute_interpolation_domain(source, p)
     all(low_corner(domain) .< high_corner(domain)) || (return source)
     _init_msh!(source, domain, ds)
-    # if not a root, also create all cones needed to cover interpolation points
+    # if not a root, create all cones needed to cover interpolation points
     # of parents
-    refnodes = cheb2nodes(p)
+    refnodes = chebnodes(p)
     if !isroot(source)
         source_parent = parent(source)
         for I in active_cone_idxs(source_parent)
@@ -274,6 +281,7 @@ function _initialize_cone_interpolants!(source::SourceTree{N}, X, p::Val{P}, ds_
             _addnewcone!(source, I, p)
         end
     end
+    sort!(conedatadict(source))
     return source
 end
 
@@ -337,6 +345,8 @@ function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) wh
             else
                 @timeit_debug "M2M" _moments_to_moments!(node, K, B, p, plan, buffer, cbuffer)
             end
+        end
+        for node in depth
             _chebtransform!(node, p, plan, buffer)
             @timeit_debug "M2P" _moments_to_particles!(C, K, target_tree, node, p, buffer)
             @timeit_debug "P2P" _particles_to_particles!(C, K, target_tree, node, B, node)
@@ -361,7 +371,7 @@ function _gemv_threaded!(C, K, target_tree, partition, B, T, p::Val{P}, plan, bu
             else
                 @timeit_debug "M2M" _moments_to_moments!(node, K, B, p, plan, buffer, cbuffer)
             end
-            _chebtransform!(node, p, plan, buffer)
+            @timeit_debug "Chebtransform" _chebtransform!(node, p, plan, buffer)
             @timeit_debug "M2P" _moments_to_particles!(Cthreads[id], K, target_tree, node, p, buffer)
             @timeit_debug "P2P" _particles_to_particles!(Cthreads[id], K, target_tree, node, B, node)
         end
@@ -376,17 +386,40 @@ end
 function _moments_to_moments!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buff, cbuff) where {N,Td,P}
     for I in active_cone_idxs(node)
         rec = cone_domain(node, I)
-        s = cheb2nodes(p, rec) # cheb points in parameter space
+        s = chebnodes(p, rec) # cheb points in parameter space
         x = map(si -> interp2cart(si, node), s) # cheb points in physical space
-        vals = view(buff,conedata(node,I))
+        vals = reshape(view(buff,conedata(node,I)),P)
+        # check if left index Il exists. If so, the data shared between Il and I
+        # will be handled by Il
+        idxs = if share_interp_data()
+            ntuple(N) do dim
+                Il = decrement_index(I,dim)
+                haskey(conedatadict(node),Il) ? (1:P[dim]-1) : (1:P[dim])
+                # 1:P[dim]
+            end |> CartesianIndices
+        else
+            eachindex(x)
+        end
         for chd in children(node)
+            # TODO: if number of nodes is too small, just evalute directly
             length(chd) == 0 && continue
-            for i in eachindex(x)
+            for i in idxs
                 idxcone, si = cone_index(x[i], chd)
                 # transfer block's interpolant to parent's interpolants
                 rec = cone_domain(chd, idxcone)
                 coefs = view(cbuff,conedata(chd,idxcone))
                 vals[i] += transfer_factor(K, x[i], chd) * chebeval(coefs, si, rec, p)
+            end
+        end
+        # copy the data to the cone on the right if it exists
+        if share_interp_data()
+            for dim in 1:N
+                Ir = increment_index(I,dim)
+                if haskey(conedatadict(node),Ir)
+                    vals_right = reshape(view(buff,conedata(node,Ir)),P)
+                    # FIXME: allocation in the block below
+                    copy!(selectdim(vals_right,dim,P[dim]),selectdim(vals,dim,1))
+                end
             end
         end
     end
@@ -398,7 +431,11 @@ function _chebtransform!(node::SourceTree{N,Td}, ::Val{P}, plan, buff) where {N,
         vals = view(buff,conedata(node,I))
         # transform vals to coefs in place. Coefs will be used later when the
         # current node transfers its expansion to its parent
-        coefs = chebcoefs!(reshape(vals,P...), plan)
+        coefs = if use_fftw()
+            chebtransform_fftw!(reshape(vals,P...), plan)
+        else
+            chebtransform_native!(reshape(vals,P...))
+        end
     end
     return node
 end
@@ -407,7 +444,7 @@ function _particles_to_moments!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, b
     Ypts = node |> root_elements
     for I in active_cone_idxs(node)
         rec = cone_domain(node, I)
-        s = cheb2nodes(p, rec) # cheb points in parameter space
+        s = chebnodes(p, rec) # cheb points in parameter space
         x = map(si -> interp2cart(si, node), s)
         irange = 1:length(x)
         jrange = index_range(node)
@@ -539,7 +576,7 @@ function estimate_interpolation_error(kernel, node::SourceTree{N,T}, ds, p) wher
     # pick a random cone
     I = CartesianIndex((1, 1, 1))
     rec = els[I]
-    s = cheb2nodes(p, rec) # cheb points in parameter space
+    s = chebnodes(p, rec) # cheb points in parameter space
     x = map(si -> interp2cart(si, node), s)
     irange = 1:length(x)
     Tk = hasmethod(return_type, Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel, eltype(x), eltype(x))
@@ -554,7 +591,7 @@ function estimate_interpolation_error(kernel, node::SourceTree{N,T}, ds, p) wher
         xi = x[i] # cartesian coordinate of node
         vals[i] = inv_centered_factor(kernel, xi, node) * vals[i]
     end
-    coefs = chebcoefs!(reshape(vals, p...))
+    coefs = use_fftw() ? chebtransform_fftw!(reshape(vals, p...)) : chebtransform_native!(reshape(vals, p...))
     ntuple(i -> cheb_error_estimate(coefs, i), N)
 end
 

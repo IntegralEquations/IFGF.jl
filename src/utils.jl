@@ -140,3 +140,33 @@ For oscillatory kernels, return the characteristic wavenumber (i.e `2π` divided
 by he wavelength). For non-oscillatory kernels, return `0`.
 """
 function wavenumber end
+
+
+
+# @inline function selectlastdim(A::StaticArray,i)
+#     N = ndims(A)
+#     I = ntuple(N) do d
+#         d == N ? i : Colon()
+#     end
+#     @inbounds getindex(A,I...)
+#     # view(A,I...)
+# end
+
+# @inline function selectlastdim(A::SizedArray,i)
+#     N = ndims(A)
+#     I = ntuple(N) do d
+#         d == N ? i : Colon()
+#     end
+#     # @inbounds getindex(A,I...)
+#     view(A,I...)
+# end
+
+function reim_view(c::Array{Complex{T},N}) where {T,N}
+    cs = reinterpret(T,c)
+    n1 = size(cs,1)
+    idxs_re = ntuple(i-> i==1 ? (1:2:n1) : Colon(),N)
+    idxs_im = ntuple(i-> i==1 ? (2:2:n1) : Colon(),N)
+    cr = view(cs,idxs_re...)
+    ci = view(cs,idxs_im...)
+    return cr,ci
+end
