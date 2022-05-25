@@ -185,10 +185,21 @@ function _compute_interaction_list!(source::SourceTree, target::TargetTree, adm)
         return nothing
     end
     # handle the various possibilities
-    if isleaf(target) || isleaf(source)
-        _addtonearlist!(source, target)
-    elseif adm(target, source)
+    # handle the various possibilities
+    if adm(target, source)
         _addtofarlist!(source, target)
+    elseif isleaf(target) && isleaf(source)
+        _addtonearlist!(source, target)
+    elseif isleaf(target)
+        # recurse on children of source
+        for source_child in children(source)
+            _compute_interaction_list!(source_child, target, adm)
+        end
+    elseif isleaf(source)
+        # recurse on children of target
+        for target_child in children(target)
+            _compute_interaction_list!(source, target_child, adm)
+        end
     else
         # TODO: when both have children, how to recurse down? Two strategies
         # below:
@@ -338,9 +349,8 @@ function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) wh
         fill!(buffer,zero(eltype(buffer)))
         for node in depth
             length(node) == 0 && continue
-            # allocate necessary interpolation data and perform necessary
-            # precomputations
             if isleaf(node)
+                @timeit_debug "P2P" _particles_to_particles!(C, K, target_tree, node, B, node)
                 @timeit_debug "P2M" _particles_to_moments!(node, K, B, p, plan, buffer)
             else
                 @timeit_debug "M2M" _moments_to_moments!(node, K, B, p, plan, buffer, cbuffer)
@@ -349,7 +359,6 @@ function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) wh
         for node in depth
             _chebtransform!(node, p, plan, buffer)
             @timeit_debug "M2P" _moments_to_particles!(C, K, target_tree, node, p, buffer)
-            @timeit_debug "P2P" _particles_to_particles!(C, K, target_tree, node, B, node)
         end
         cbuffer, buffer = buffer, cbuffer
     end
@@ -367,13 +376,15 @@ function _gemv_threaded!(C, K, target_tree, partition, B, T, p::Val{P}, plan, bu
             id = Threads.threadid()
             length(node) == 0 && continue
             if isleaf(node)
+                @timeit_debug "P2P" _particles_to_particles!(Cthreads[id], K, target_tree, node, B, node)
                 @timeit_debug "P2M" _particles_to_moments!(node, K, B, p, plan, buffer)
             else
                 @timeit_debug "M2M" _moments_to_moments!(node, K, B, p, plan, buffer, cbuffer)
             end
-            @timeit_debug "Chebtransform" _chebtransform!(node, p, plan, buffer)
-            @timeit_debug "M2P" _moments_to_particles!(Cthreads[id], K, target_tree, node, p, buffer)
-            @timeit_debug "P2P" _particles_to_particles!(Cthreads[id], K, target_tree, node, B, node)
+        end
+        for node in depth
+            _chebtransform!(node, p, plan, buffer)
+            @timeit_debug "M2P" _moments_to_particles!(C, K, target_tree, node, p, buffer)
         end
         cbuffer, buffer = buffer, cbuffer
     end
