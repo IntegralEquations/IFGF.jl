@@ -83,7 +83,7 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     order   = nothing,
     Δs      = 1.0,
     threads = true,
-    splitter= DyadicSplitter(nmax)
+    splitter= DyadicSplitter(;nmax)
     )
 
     k        = wavenumber(kernel)
@@ -424,17 +424,29 @@ function _moments_to_moments!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buf
         end
         # copy the data to the cone on the right if it exists
         if share_interp_data()
-            for dim in 1:N
-                Ir = increment_index(I,dim)
-                if haskey(conedatadict(node),Ir)
-                    vals_right = reshape(view(buff,conedata(node,Ir)),P)
-                    # FIXME: allocation in the block below
-                    copy!(selectdim(vals_right,dim,P[dim]),selectdim(vals,dim,1))
-                end
-            end
+            _transfer_right(I,vals,buff,conedatadict(node),p)
         end
     end
     return node
+end
+
+# transfer the data from a left cell to its right neighbors
+function _transfer_right(I,vals_left,buff,dict,::Val{P}) where {P}
+    N = length(P)
+    for dim in 1:N
+        Ir = increment_index(I,dim)
+        if haskey(dict,Ir)
+            vals_right = reshape(view(buff,dict[Ir]),P)
+            # HACK: because the line below allocates (don't know why), we have
+            # to build the indices manually to copy the data.
+            # copy!(selectdim(vals_right,dim,P[dim]),selectdim(vals,dim,1))
+            idxs_left   = ntuple(i->i==dim ? (P[i]:P[i]) : 1:P[i],N) |> CartesianIndices
+            idxs_right  = ntuple(i->i==dim ? (1:1) : 1:P[i],N) |> CartesianIndices
+            for i in 1:length(idxs_left)
+                vals_right[idxs_left[i]] = vals_left[idxs_right[i]]
+            end
+        end
+    end
 end
 
 function _chebtransform!(node::SourceTree{N,Td}, ::Val{P}, plan, buff) where {N,Td,P}
@@ -475,7 +487,7 @@ function _moments_to_particles!(C, K, target_tree, node::SourceTree{N,T}, p::Val
         for i in index_range(far_target)
             x = Xpts[i]
             I, s = cone_index(coords(x), node)
-            rec = cone_domain(node, I)
+            rec  = cone_domain(node, I)
             coefs    = view(buff,conedata(node,I))
             C[i] += centered_factor(K, Xpts[i], node) * chebeval(coefs, s, rec, p)
         end

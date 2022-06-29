@@ -3,6 +3,7 @@
 *.jl.mem
 /docs/build/
 /sandbox/
+/benchmark/**
 /test/Manifest.toml
 /docs/Manifest.toml
 Manifest.toml

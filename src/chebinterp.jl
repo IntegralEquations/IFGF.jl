@@ -176,8 +176,8 @@ in the IFGF algorithm is typically a view of some larger array which is reused
 at different levels of the algorithn. We then pass the size of the coefficients
 statically which allows for various improvements by the compiler (like loop unrolling).
 =#
-@inline @fastmath function _evaluate(x, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {dim,SZ}
-    @inbounds n = SZ[dim]
+@fastmath function _evaluate(x, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {dim,SZ}
+    @inbounds n  = SZ[dim]
     @inbounds xd = x[dim]
     if dim == 1
         @inbounds c₁ = c[i1]
@@ -221,15 +221,30 @@ end
 @inline @fastmath function chebeval_vec(coefs,x::SVector{N,<:Real},rec::HyperRectangle,sz::Val{SZ}) where {N,SZ}
     N == 1 && (return chebeval_novec(coefs,x,rec,sz))
     x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
-    return _evaluate_vec(x0.data, coefs, sz)
+    return _evaluate_vec(x0, coefs, sz)
 end
 
-@inline function _evaluate_vec(x::NTuple,coeffs,::Val{SZ}) where {SZ}
+@inline @fastmath function _evaluate_vec(x,coeffs,::Val{SZ}) where {SZ}
 	N      = length(x)
 	T      = eltype(coeffs)
 	coeffs = reinterpret(SVector{SZ[1],T},coeffs)
-    f1d    = _evaluate(x[2:end], coeffs, Val{N-1}(), 1, length(coeffs), Val(SZ[2:end]))
-    _evaluate(x[1], f1d, Val{1}(), 1, length(SZ[1]), Val(SZ[1:1]))
+    f1d    = _evaluate(deleteat(x,1), coeffs, Val{N-1}(), 1, length(coeffs), Val(SZ[2:end]))
+    _evaluate(x[1], f1d, Val{1}(), 1, SZ[1], Val(SZ[1:1]))
+end
+
+@inline @fastmath function chebeval_vecmat(coefs,x::SVector{N,<:Real},rec,sz) where {N}
+    N == 1 && (return chebeval_novec(coefs,x,rec,sz))
+    x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
+    return _evaluate_vecmat(x0, coefs, sz)
+end
+
+@inline function _evaluate_vecmat(x,coeffs,::Val{SZ}) where {SZ}
+	N      = length(SZ)
+	T      = eltype(coeffs)
+    SZ′    = SZ[1:end-1]
+	coeffs = reinterpret(SVector{prod(SZ′),T},coeffs)
+    c̃      = _evaluate(x[end], coeffs, Val{1}(), 1, SZ[N], Val(SZ[N:N]))
+    _evaluate(deleteat(x,N), c̃, Val{N-1}(), 1, prod(SZ′), Val(SZ[1:N-1]))
 end
 
 # @fastmath function chebeval_vec(coefs,x::SVector{N,<:Real},rec::HyperRectangle,sz::Val{SZ}) where {N,SZ}
