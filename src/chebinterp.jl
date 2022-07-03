@@ -73,7 +73,7 @@ function chebnodes(p::NTuple,rec::HyperRectangle)
 end
 
 """
-    chebcoefs!(vals::AbstractArray[, plan])
+    chebtransform_fftw!(vals::AbstractArray[, plan])
 
 Given a function values on the `chebnodes(p)`, where `p=size(vals)`, compute
 the Chebyshev coefficients in-place. The underlying implementation uses the
@@ -109,7 +109,7 @@ function chebtransform_fftw!(vals::AbstractArray{<:SVector{K}},plan) where {K}
 end
 
 """
-    chebcoefs_native!(vals)
+    chebtransform_native!(vals)
 
 Compute the Chebyshev coefficients given the values of a function on the
 Chebyshev nodes of the second kind (i.e. the extrema of the Chebyshev

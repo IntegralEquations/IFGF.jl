@@ -1,4 +1,30 @@
 """
+    share_interp_data(mode=true)
+
+If set to `true`, neighboring cone interpolants will share their interpolation
+data (which are, in this case, computed only once).
+"""
+function share_interp_data(mode = true)
+    @eval _share_interp_data() = $mode
+    mode
+end
+_share_interp_data() = true
+
+"""
+    use_fftw(mode=true)
+
+Use the [FFTW](http://www.fftw.org) library for computing the Chebyshev transform.
+"""
+function use_fftw(mode=true)
+    @eval _use_fftw() = $mode
+    mode
+end
+_use_fftw()          = true
+
+# TODO: benchmark and document the options here
+chebeval(args...)   = chebeval_novec(args...)
+
+"""
     @hprofile
 
 A macro which

@@ -97,7 +97,7 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     Tv = _density_type_from_kernel_type(T)
     # create source and target trees
     @timeit_debug "source tree initialization" begin
-        source_tree = initialize_source_tree(; Ypoints, splitter)
+        source_tree = initialize_source_tree(; points=Ypoints, splitter)
         prune!(source_tree)
     end
     partition = partition_by_depth(source_tree)
@@ -119,7 +119,7 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     @timeit_debug "cone list computation" begin
         _compute_cone_list!(partition, Xpoints, Val(p), ds_func, threads)
     end
-      # preallocate buffers for holding all interpolation values/coefs and decide
+    # preallocate buffers for holding all interpolation values/coefs and decide
     # which memory is "owned" by each cone
     buffers = _allocate_buffers!(partition,prod(p),Tv)
     # call main constructor
@@ -355,8 +355,6 @@ function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) wh
             else
                 @timeit_debug "M2M" _moments_to_moments!(node, K, B, p, plan, buffer, cbuffer)
             end
-        end
-        for node in depth
             _chebtransform!(node, p, plan, buffer)
             @timeit_debug "M2P" _moments_to_particles!(C, K, target_tree, node, p, buffer)
         end
@@ -402,7 +400,7 @@ function _moments_to_moments!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buf
         vals = reshape(view(buff,conedata(node,I)),P)
         # check if left index Il exists. If so, the data shared between Il and I
         # will be handled by Il
-        idxs = if share_interp_data()
+        idxs = if _share_interp_data()
             ntuple(N) do dim
                 Il = decrement_index(I,dim)
                 haskey(conedatadict(node),Il) ? (1:P[dim]-1) : (1:P[dim])
@@ -423,7 +421,7 @@ function _moments_to_moments!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buf
             end
         end
         # copy the data to the cone on the right if it exists
-        if share_interp_data()
+        if _share_interp_data()
             _transfer_right(I,vals,buff,conedatadict(node),p)
         end
     end
@@ -454,7 +452,7 @@ function _chebtransform!(node::SourceTree{N,Td}, ::Val{P}, plan, buff) where {N,
         vals = view(buff,conedata(node,I))
         # transform vals to coefs in place. Coefs will be used later when the
         # current node transfers its expansion to its parent
-        coefs = if use_fftw()
+        coefs = if _use_fftw()
             chebtransform_fftw!(reshape(vals,P...), plan)
         else
             chebtransform_native!(reshape(vals,P...))
@@ -614,7 +612,7 @@ function estimate_interpolation_error(kernel, node::SourceTree{N,T}, ds, p) wher
         xi = x[i] # cartesian coordinate of node
         vals[i] = inv_centered_factor(kernel, xi, node) * vals[i]
     end
-    coefs = use_fftw() ? chebtransform_fftw!(reshape(vals, p...)) : chebtransform_native!(reshape(vals, p...))
+    coefs = _use_fftw() ? chebtransform_fftw!(reshape(vals, p...)) : chebtransform_native!(reshape(vals, p...))
     ntuple(i -> cheb_error_estimate(coefs, i), N)
 end
 

@@ -2,10 +2,6 @@ module IFGF
 
 const PROJECT_ROOT =  pkgdir(IFGF)
 
-share_interp_data() = true
-use_fftw()          = true
-chebeval(args...)   = chebeval_novec(args...)
-
 using LinearAlgebra
 using StaticArrays
 using TimerOutputs
@@ -14,7 +10,6 @@ using FFTW
 using OrderedCollections
 
 import AbstractTrees
-import WavePropBase
 import LinearAlgebra: mul!
 
 import WavePropBase:

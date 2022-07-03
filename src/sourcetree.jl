@@ -8,10 +8,10 @@ single/double precision), and `V` is the type of the density that will be
 interpolated.
 
 # Fields:
-- `msh`: uniform cartesian mesh of the interpolation space,
-    indexable by a `CartesianIndex`
-- `conedatadict`: dictionary mapping a cone tag `I::CartesianIndex` to an
-  `Array` storing its interpolation values/coefficient.
+- `msh`: uniform cartesian mesh of the interpolation space, indexable by a
+  `CartesianIndex`
+- `conedatadict`: dictionary mapping a cone tag `I::CartesianIndex` to the index
+  range of the interpolation points owned by that cone
 - `farlist`: nodes on the target tree that can be evaluated through
     interpolation
 - `nearlist`: nodes on the target tree that must be evaluated by a direct sum.
@@ -36,8 +36,9 @@ end
     const SourceTree{N,T,V}
 
 Type alias for a `ClusterTree` of points (represented as `SVector{N,T}`) storing
-data of type [`SourceTreeData{N,T,V}`](@ref). See the documentation of
-[`ClusterTree`](@ref) for more details.
+data of type [`SourceTreeData{N,T,V}`](@ref).
+
+## See also: [`ClusterTree`](@ref)
 """
 const SourceTree{N,T} = ClusterTree{Vector{SVector{N,T}},HyperRectangle{N,T},SourceTreeData{N,T}}
 
@@ -47,7 +48,7 @@ conedatadict(t::SourceTree)                   = t.data.conedatadict
 active_cone_idxs(t::SourceTree)               = keys(conedatadict(t))
 farlist(t::SourceTree)                        = t.data.farlist
 nearlist(t::SourceTree)                       = t.data.nearlist
-center(t::SourceTree)            = t |> container |> center
+center(t::SourceTree)                         = t |> container |> center
 cone_domains(t::SourceTree)                   = msh(t) |> ElementIterator # iterator of HyperRectangles
 cone_domain(t::SourceTree, I::CartesianIndex) = cone_domains(t)[I]
 conedata(t::SourceTree,I::CartesianIndex)    = conedatadict(t)[I]
@@ -59,7 +60,8 @@ _addtonearlist!(s::SourceTree, t::TargetTree) = push!(nearlist(s), t)
 """
     _addnewcone!(node::SourceTree,I::CartesianIndex,p)
 
-If `node` does not contain cone `I`, add it to the `conedict`.
+If `node` does not contain cone `I`, add it to the `conedict`. Does not set the
+indices of the interpolation data owned by the cone.
 """
 function _addnewcone!(node::SourceTree, idxcone, ::Val{P}) where {P}
     cd = conedatadict(node)
@@ -163,7 +165,7 @@ end
 end
 
 """
-    initialize_source_tree(;points,datatype,splitter,Xdatatype)
+    initialize_source_tree(;points,splitter)
 
 Create the tree-structure for clustering the source `points` using the splitting
 strategy of `splitter`, returning a `SourceTree` built through the empty
@@ -172,12 +174,10 @@ constructor (i.e. `data = SourceTreeData()`).
 # Arguments
 - `points`: vector of source points.
 - `splitter`: splitting strategy.
-- `Xdatatype`: type container of target points.
-- `Vdatatype`: type of value stored at interpolation nodes
 """
-function initialize_source_tree(; Ypoints::Vector{SVector{N,T}}, splitter) where {N,T}
+function initialize_source_tree(; points::Vector{SVector{N,T}}, splitter) where {N,T}
     source_tree_datatype = SourceTreeData{N,T}
-    source_tree = ClusterTree{source_tree_datatype}(Ypoints, splitter)
+    source_tree          = ClusterTree{source_tree_datatype}(points, splitter)
     return source_tree
 end
 
@@ -225,7 +225,7 @@ end
     cone_index(x::SVector,tree::SourceTree)
 
 Given a point `x` in cartesian coordinates, return the index `I` of the cone in
-`source` to whcih `x` belongs, as well as its parametric coordinate `s`.
+`source` to which `x` belongs, as well as its parametric coordinate `s`.
 
 ## See also: [`cart2interp`](@ref)
 """
