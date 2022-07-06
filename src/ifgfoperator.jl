@@ -98,12 +98,10 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     # create source and target trees
     @timeit_debug "source tree initialization" begin
         source_tree = initialize_source_tree(; points=Ypoints, splitter)
-        prune!(source_tree)
     end
     partition = partition_by_depth(source_tree)
     @timeit_debug "target tree initialization" begin
         target_tree = initialize_target_tree(; Xpoints, splitter)
-        prune!(target_tree)
     end
     # if `order` is not passed explicitly, estimate it
     if order === nothing
@@ -127,20 +125,7 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     return ifgf
 end
 
-function prune!(tree::ClusterTree)
-    isleaf(tree) && return tree
-    idxs = Int[]
-    for (i,chd) in enumerate(children(tree))
-        if length(chd) == 0
-            push!(idxs,i)
-        else
-            prune!(chd)
-        end
-    end
-    deleteat!(children(tree),idxs)
-    return tree
-end
-
+# memory need for forward map
 function _allocate_buffers!(partition,p,Tv)
     nmax      = 0
     for nodes in partition
@@ -169,12 +154,12 @@ computed using the direct summation.  The `farlist` includes all nodes in
 `target_tree` for which an accurate interpolant in available in the source node.
 
 The `adm` function is called through `adm(target,source)` to determine if
-`target` is in the `farlist` of source. When that is not the case we recurse
-on their children unless both are a leaves, in which
-case `target` is added to the `nearlist` of source.
+`target` is in the `farlist` of source. When that is not the case we recurse on
+their children unless both are a leaves, in which case `target` is added to the
+`nearlist` of source.
 """
 function compute_interaction_list!(ifgf::IFGFOp, threads=false)
-    # TODO: implement threaded implementation of this pass
+    # TODO: threaded implementation of this pass
     _compute_interaction_list!(source_tree(ifgf), target_tree(ifgf), admissibility_func(ifgf))
     return ifgf
 end
@@ -184,7 +169,6 @@ function _compute_interaction_list!(source::SourceTree, target::TargetTree, adm)
     if length(source) == 0 || length(target) == 0
         return nothing
     end
-    # handle the various possibilities
     # handle the various possibilities
     if adm(target, source)
         _addtofarlist!(source, target)
@@ -206,11 +190,11 @@ function _compute_interaction_list!(source::SourceTree, target::TargetTree, adm)
         # strategy 1: recurse on children of largest box
         # if radius(source) > radius(target)
         #     for source_child in children(source)
-        #         compute_interaction_list!(source_child, target, adm)
+        #         _compute_interaction_list!(source_child, target, adm)
         #     end
         # else
         #     for target_child in children(target)
-        #         compute_interaction_list!(source, target_child, adm)
+        #         _compute_interaction_list!(source, target_child, adm)
         #     end
         # end
         # strategy 2: recurse on children of both target and source
@@ -351,12 +335,12 @@ function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) wh
             length(node) == 0 && continue
             if isleaf(node)
                 @timeit_debug "P2P" _particles_to_particles!(C, K, target_tree, node, B, node)
-                @timeit_debug "P2M" _particles_to_moments!(node, K, B, p, plan, buffer)
+                @timeit_debug "P2I" _particles_to_interpolants!(node, K, B, p, plan, buffer)
             else
-                @timeit_debug "M2M" _moments_to_moments!(node, K, B, p, plan, buffer, cbuffer)
+                @timeit_debug "I2I" _interpolants_to_interpolants(node, K, B, p, plan, buffer, cbuffer)
             end
             _chebtransform!(node, p, plan, buffer)
-            @timeit_debug "M2P" _moments_to_particles!(C, K, target_tree, node, p, buffer)
+            @timeit_debug "I2P" _interpolants_to_particles!(C, K, target_tree, node, p, buffer)
         end
         cbuffer, buffer = buffer, cbuffer
     end
@@ -375,14 +359,14 @@ function _gemv_threaded!(C, K, target_tree, partition, B, T, p::Val{P}, plan, bu
             length(node) == 0 && continue
             if isleaf(node)
                 @timeit_debug "P2P" _particles_to_particles!(Cthreads[id], K, target_tree, node, B, node)
-                @timeit_debug "P2M" _particles_to_moments!(node, K, B, p, plan, buffer)
+                @timeit_debug "P2M" _particles_to_interpolants!(node, K, B, p, plan, buffer)
             else
-                @timeit_debug "M2M" _moments_to_moments!(node, K, B, p, plan, buffer, cbuffer)
+                @timeit_debug "I2I" _interpolants_to_interpolants(node, K, B, p, plan, buffer, cbuffer)
             end
         end
         for node in depth
             _chebtransform!(node, p, plan, buffer)
-            @timeit_debug "M2P" _moments_to_particles!(C, K, target_tree, node, p, buffer)
+            @timeit_debug "M2P" _interpolants_to_particles!(C, K, target_tree, node, p, buffer)
         end
         cbuffer, buffer = buffer, cbuffer
     end
@@ -392,7 +376,7 @@ function _gemv_threaded!(C, K, target_tree, partition, B, T, p::Val{P}, plan, bu
     end
 end
 
-function _moments_to_moments!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buff, cbuff) where {N,Td,P}
+function _interpolants_to_interpolants(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buff, cbuff) where {N,Td,P}
     for I in active_cone_idxs(node)
         rec = cone_domain(node, I)
         s = chebnodes(p, rec) # cheb points in parameter space
@@ -461,7 +445,7 @@ function _chebtransform!(node::SourceTree{N,Td}, ::Val{P}, plan, buff) where {N,
     return node
 end
 
-function _particles_to_moments!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buff) where {N,Td,P}
+function _particles_to_interpolants!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buff) where {N,Td,P}
     Ypts = node |> root_elements
     for I in active_cone_idxs(node)
         rec = cone_domain(node, I)
@@ -479,7 +463,7 @@ function _particles_to_moments!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, b
     return node
 end
 
-function _moments_to_particles!(C, K, target_tree, node::SourceTree{N,T}, p::Val{P}, buff) where {N,T,P}
+function _interpolants_to_particles!(C, K, target_tree, node::SourceTree{N,T}, p::Val{P}, buff) where {N,T,P}
     Xpts = target_tree |> root_elements
     for far_target in farlist(node)
         for i in index_range(far_target)
