@@ -92,9 +92,10 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     # interpolated
     @assert tol >= 0 "`tol` must be a positive real number"
     U, V = eltype(Xpoints), eltype(Ypoints)
-    T = hasmethod(return_type, Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel, U, V)
-    assert_concrete_type(T)
-    Tv = _density_type_from_kernel_type(T)
+    Tk = hasmethod(return_type, Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel, U, V) # kernel type
+    assert_concrete_type(Tk)
+    Td = _density_type_from_kernel_type(Tk) # density type
+    Ti = Base.promote_op(*,Tk,Td) # interpolant type
     # create source and target trees
     @timeit_debug "source tree initialization" begin
         source_tree = initialize_source_tree(; points=Ypoints, splitter)
@@ -108,9 +109,9 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
         order = estimate_interpolation_order(kernel, partition, ds_func, tol, (2, 2, 2))
     end
     p = order .+ 1
-    # create an fftw plan for the chebtransform. Since `Tv` may be an `SVector`, we plan on
+    # create an fftw plan for the chebtransform. Since `Ti` may be an `SVector`, we plan on
     # its element type and perform the FFT on each component
-    plan = FFTW.plan_r2r!(zeros(eltype(Tv), p), FFTW.REDFT00; flags=FFTW.PATIENT | FFTW.UNALIGNED)
+    plan = FFTW.plan_r2r!(zeros(eltype(Ti), p), FFTW.REDFT00; flags=FFTW.PATIENT | FFTW.UNALIGNED)
     @timeit_debug "interaction list computation" begin
         _compute_interaction_list!(source_tree, target_tree, adm)
     end
@@ -119,9 +120,9 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     end
     # preallocate buffers for holding all interpolation values/coefs and decide
     # which memory is "owned" by each cone
-    buffers = _allocate_buffers!(partition,prod(p),Tv)
+    buffers = _allocate_buffers!(partition,prod(p),Ti)
     # call main constructor
-    ifgf = IFGFOp{T}(kernel, target_tree, source_tree, p, ds_func, adm, plan, partition, buffers)
+    ifgf = IFGFOp{Tk}(kernel, target_tree, source_tree, p, ds_func, adm, plan, partition, buffers)
     return ifgf
 end
 
@@ -188,21 +189,21 @@ function _compute_interaction_list!(source::SourceTree, target::TargetTree, adm)
         # TODO: when both have children, how to recurse down? Two strategies
         # below:
         # strategy 1: recurse on children of largest box
-        # if radius(source) > radius(target)
-        #     for source_child in children(source)
-        #         _compute_interaction_list!(source_child, target, adm)
-        #     end
-        # else
-        #     for target_child in children(target)
-        #         _compute_interaction_list!(source, target_child, adm)
-        #     end
-        # end
-        # strategy 2: recurse on children of both target and source
-        for source_child in children(source)
+        if radius(source) > radius(target)
+            for source_child in children(source)
+                _compute_interaction_list!(source_child, target, adm)
+            end
+        else
             for target_child in children(target)
-                _compute_interaction_list!(source_child, target_child, adm)
+                _compute_interaction_list!(source, target_child, adm)
             end
         end
+        # strategy 2: recurse on children of both target and source
+        # for source_child in children(source)
+        #     for target_child in children(target)
+        #         _compute_interaction_list!(source_child, target_child, adm)
+        #     end
+        # end
     end
 
     return nothing
@@ -339,7 +340,7 @@ function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) wh
             else
                 @timeit_debug "I2I" _interpolants_to_interpolants(node, K, B, p, plan, buffer, cbuffer)
             end
-            _chebtransform!(node, p, plan, buffer)
+            @timeit_debug "V2C" _chebtransform!(node, p, plan, buffer)
             @timeit_debug "I2P" _interpolants_to_particles!(C, K, target_tree, node, p, buffer)
         end
         cbuffer, buffer = buffer, cbuffer

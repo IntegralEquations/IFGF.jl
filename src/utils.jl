@@ -133,7 +133,7 @@ multiplying an element of type `T` with an element of type `V` makes sense.
 function _density_type_from_kernel_type(T)
     if T <: Number
         return T
-    elseif T <: SMatrix
+    elseif T <: Union{SMatrix,Adjoint}
         m,n = size(T)
         return SVector{n,eltype(T)}
     else
