@@ -49,8 +49,7 @@ active_cone_idxs(t::SourceTree)               = keys(conedatadict(t))
 farlist(t::SourceTree)                        = t.data.farlist
 nearlist(t::SourceTree)                       = t.data.nearlist
 center(t::SourceTree)                         = t |> container |> center
-cone_domains(t::SourceTree)                   = msh(t) |> ElementIterator # iterator of HyperRectangles
-cone_domain(t::SourceTree, I::CartesianIndex) = cone_domains(t)[I]
+cone_domain(t::SourceTree, I::CartesianIndex) = t.data.msh[I]
 conedata(t::SourceTree,I::CartesianIndex)    = conedatadict(t)[I]
 
 # setters
@@ -243,8 +242,7 @@ Given a point `s ∈ m`, return the index `I` of the element in `m` containing
 `s`.
 """
 function element_index(s::SVector{N},m::UniformCartesianMesh{N}) where {N}
-    els = ElementIterator(m)
-    sz = size(els)
+    sz = size(m)
     Δs = step(m)
     lc = low_corner(m)
     uc = high_corner(m)

@@ -266,3 +266,24 @@ Create an `SVector` of length n, computing each element as f(i), where `i ∈
 1:n`.
 """
 svector(f, n) = ntuple(f, n) |> SVector
+
+# some reasonable defaults for center
+center(x::Tuple) = SVector(x)
+center(x::SVector) = x
+
+"""
+    coords(x)
+
+Return an `SVector` with the cartesian coordinates associated to a geometrical
+object `x`.
+"""
+coords(x::Tuple) = SVector(x)
+coords(x::SVector) = x
+
+function coords(x::T) where {T}
+    if hasfield(T, :coords)
+        return getfield(x, :coords)
+    else
+        error("type $T has no method nor field named `coords`.")
+    end
+end
