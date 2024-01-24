@@ -226,9 +226,12 @@ end
 
 @inline @fastmath function _evaluate_vec(x,coeffs,::Val{SZ}) where {SZ}
 	N      = length(x)
-	T      = eltype(coeffs)
-	coeffs = reinterpret(SVector{SZ[1],T},coeffs)
-    f1d    = _evaluate(deleteat(x,1), coeffs, Val{N-1}(), 1, length(coeffs), Val(SZ[2:end]))
+    T      = eltype(coeffs)
+    V      = SVector{SZ[1],T}
+    n      = length(coeffs) ÷ SZ[1]
+	# coeffs_ = reinterpret(V,coeffs)
+    coeffs_ = unsafe_wrap(Array,reinterpret(Ptr{V},pointer(coeffs)),n)
+    f1d    = _evaluate(deleteat(x,1), coeffs_, Val{N-1}(), 1, n, Val(SZ[2:end]))
     _evaluate(x[1], f1d, Val{1}(), 1, SZ[1], Val(SZ[1:1]))
 end
 

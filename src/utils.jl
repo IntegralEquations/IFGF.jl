@@ -19,10 +19,25 @@ function use_fftw(mode=true)
     @eval _use_fftw() = $mode
     mode
 end
-_use_fftw()          = true
+_use_fftw()          = false
 
-# TODO: benchmark and document the options here
-chebeval(args...)   = chebeval_novec(args...)
+"""
+    use_vectorized_chebeval(mode=true)
+
+Use a vectorized version of the Chebyshev evaluation routine. Calling this
+function will redefine `chebeval` to point to either `chebeval_vec` or
+`chebeval_novec`, and thus may trigger code recompilation.
+"""
+function use_vectorized_chebeval(mode=true)
+    if mode
+        @eval chebeval(args...) = chebeval_vec(args...)
+    else
+        @eval chebeval(args...) = chebeval_novec(args...)
+    end
+    return nothing
+end
+# default choice
+chebeval(args...) = chebeval_vec(args...)
 
 """
     @hprofile
