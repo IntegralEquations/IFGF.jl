@@ -92,8 +92,8 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     # interpolated
     @assert tol >= 0 "`tol` must be a positive real number"
     U, V = eltype(Xpoints), eltype(Ypoints)
-    Tk = hasmethod(return_type, Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel, U, V) # kernel type
-    assert_concrete_type(Tk)
+    Tk = return_type(kernel, U, V) # kernel type
+    isconcretetype(Tk) || error("unable to infer a concrete type for the kernel")
     Td = _density_type_from_kernel_type(Tk) # density type
     Ti = Base.promote_op(*,Tk,Td) # interpolant type
     # create source and target trees
@@ -585,8 +585,7 @@ function estimate_interpolation_error(kernel, node::SourceTree{N,T}, ds, p) wher
     s = chebnodes(p, rec) # cheb points in parameter space
     x = map(si -> interp2cart(si, node), s)
     irange = 1:length(x)
-    Tk = hasmethod(return_type, Tuple{typeof(kernel)}) ? return_type(kernel) : Base.promote_op(kernel, eltype(x), eltype(x))
-    assert_concrete_type(Tk)
+    Tk = return_type(kernel, eltype(x), eltype(x))
     Tv = _density_type_from_kernel_type(Tk)
     vals = zeros(Tv, p...)
     Ypts = root_elements(node)[node.index_range]

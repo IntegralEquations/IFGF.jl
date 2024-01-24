@@ -182,32 +182,87 @@ by he wavelength). For non-oscillatory kernels, return `0`.
 """
 function wavenumber end
 
+"""
+    increment_index(I::CartesianIndex,k[,n=1])
 
-
-# @inline function selectlastdim(A::StaticArray,i)
-#     N = ndims(A)
-#     I = ntuple(N) do d
-#         d == N ? i : Colon()
-#     end
-#     @inbounds getindex(A,I...)
-#     # view(A,I...)
-# end
-
-# @inline function selectlastdim(A::SizedArray,i)
-#     N = ndims(A)
-#     I = ntuple(N) do d
-#         d == N ? i : Colon()
-#     end
-#     # @inbounds getindex(A,I...)
-#     view(A,I...)
-# end
-
-function reim_view(c::Array{Complex{T},N}) where {T,N}
-    cs = reinterpret(T,c)
-    n1 = size(cs,1)
-    idxs_re = ntuple(i-> i==1 ? (1:2:n1) : Colon(),N)
-    idxs_im = ntuple(i-> i==1 ? (2:2:n1) : Colon(),N)
-    cr = view(cs,idxs_re...)
-    ci = view(cs,idxs_im...)
-    return cr,ci
+Increment `I` by `n` along  the dimension `k`. This is equivalent to `I +=
+n*eₖ`, where `eₖ` is a vector with with `1` at the  `k`-th coordinate and zeros elsewhere.
+"""
+function increment_index(I::CartesianIndex, dim::Integer, nb::Integer=1)
+    N = length(I)
+    @assert 1 ≤ dim ≤ length(I)
+    return I + CartesianIndex(ntuple(i -> i == dim ? nb : 0, N))
 end
+
+"""
+    decrement_index(I::CartesianIndex,k[,n=1])
+
+Equivalent to [`increment_index`](@ref)(I,k,-n)
+"""
+function decrement_index(I::CartesianIndex, dim::Integer, nb::Integer=1)
+    N = length(I)
+    @assert 1 ≤ dim ≤ length(I)
+    return I + CartesianIndex(ntuple(i -> i == dim ? -nb : 0, N))
+end
+
+"""
+    return_type(f[,args...])
+
+The type returned by `f(args...)`, where `args` is a tuple of types. Falls back
+to `Base.promote_op` by default.
+
+A functors of type `T` with a known return type should extend
+`return_type(::T,args...)` to avoid relying on `promote_op`.
+"""
+function return_type(f, args...)
+    @debug "using `Base.promote_op` to infer return type. Consider defining `return_type(::typeof($f),args...)`."
+    return Base.promote_op(f, args...)
+end
+
+"""
+    depth(tree,acc=0)
+
+Recursive function to compute the depth of `node` in a a tree-like structure.
+
+Overload this function if your structure has a more efficient way to compute
+`depth` (e.g. if it stores it in a field).
+"""
+function depth(tree, acc=0)
+    if isroot(tree)
+        return acc
+    else
+        depth(parent(tree), acc + 1)
+    end
+end
+
+"""
+    partition_by_depth(tree)
+
+Given a `tree`, return a `partition` vector whose `i`-th entry stores all the nodes in
+`tree` with `depth=i-1`. Empty nodes are not added to the partition.
+"""
+function partition_by_depth(tree)
+    T = typeof(tree)
+    partition = Vector{Vector{T}}()
+    depth = 0
+    return _partition_by_depth!(partition, tree, depth)
+end
+
+function _partition_by_depth!(partition, tree, depth)
+    if length(partition) < depth + 1
+        push!(partition, [])
+    end
+    length(tree) > 0 && push!(partition[depth + 1], tree)
+    for chd in children(tree)
+        _partition_by_depth!(partition, chd, depth + 1)
+    end
+    return partition
+end
+
+"""
+    svector(f,n)
+
+Create an `SVector` of length n, computing each element as f(i), where `i ∈
+1:n`.
+"""
+svector(f, n) = ntuple(f, n) |> SVector
