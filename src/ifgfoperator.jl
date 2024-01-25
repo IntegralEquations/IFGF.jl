@@ -26,6 +26,7 @@ struct IFGFOp{T} <: AbstractMatrix{T}
     p::NTuple
     ds_func::Function
     adm_func::Function
+    plan::FFTW.FFTWPlan
     _source_tree_depth_partition
     buffers
 end
@@ -108,6 +109,9 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
         order = estimate_interpolation_order(kernel, partition, ds_func, tol, (2, 2, 2))
     end
     p = order .+ 1
+    # create an fftw plan for the chebtransform. Since `Ti` may be an `SVector`, we plan on
+    # its element type and perform the FFT on each component
+    plan = FFTW.plan_r2r!(zeros(eltype(Ti), p), FFTW.REDFT00; flags=FFTW.PATIENT | FFTW.UNALIGNED)
     @timeit_debug "interaction list computation" begin
         _compute_interaction_list!(source_tree, target_tree, adm)
     end
@@ -118,7 +122,7 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     # which memory is "owned" by each cone
     buffers = _allocate_buffers!(partition,prod(p),Ti)
     # call main constructor
-    ifgf = IFGFOp{Tk}(kernel, target_tree, source_tree, p, ds_func, adm, partition, buffers)
+    ifgf = IFGFOp{Tk}(kernel, target_tree, source_tree, p, ds_func, adm, plan, partition, buffers)
     return ifgf
 end
 
@@ -307,9 +311,9 @@ function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOp, x::AbstractVector, a::
     K = kernel(A)
     partition = A._source_tree_depth_partition
     if threads
-        _gemv_threaded!(y, K, rtree, partition, x, T, Val(A.p),A.buffers)
+        _gemv_threaded!(y, K, rtree, partition, x, T, Val(A.p),A.plan,A.buffers)
     else
-        _gemv!(y, K, rtree, partition, x, T, Val(A.p),A.buffers)
+        _gemv!(y, K, rtree, partition, x, T, Val(A.p),A.plan,A.buffers)
     end
     # permute output
     global_index && invpermute!(y, loc2glob(rtree))
@@ -324,7 +328,7 @@ function LinearAlgebra.mul!(y::AbstractMatrix, A::IFGFOp, x::AbstractMatrix, a::
     return y
 end
 
-function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, buffers) where {P}
+function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) where {P}
     buffer,cbuffer = buffers
     for depth in Iterators.reverse(partition)
         fill!(buffer,zero(eltype(buffer)))
@@ -332,18 +336,18 @@ function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, buffers) where {P
             length(node) == 0 && continue
             if isleaf(node)
                 @timeit_debug "P2P" _particles_to_particles!(C, K, target_tree, node, B, node)
-                @timeit_debug "P2I" _particles_to_interpolants!(node, K, B, p, buffer)
+                @timeit_debug "P2I" _particles_to_interpolants!(node, K, B, p, plan, buffer)
             else
-                @timeit_debug "I2I" _interpolants_to_interpolants(node, K, B, p, buffer, cbuffer)
+                @timeit_debug "I2I" _interpolants_to_interpolants(node, K, B, p, plan, buffer, cbuffer)
             end
-            @timeit_debug "V2C" _chebtransform!(node, p, buffer)
+            @timeit_debug "V2C" _chebtransform!(node, p, plan, buffer)
             @timeit_debug "I2P" _interpolants_to_particles!(C, K, target_tree, node, p, buffer)
         end
         cbuffer, buffer = buffer, cbuffer
     end
 end
 
-function _gemv_threaded!(C, K, target_tree, partition, B, T, p::Val{P}, buffers) where {P}
+function _gemv_threaded!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) where {P}
     buffer,cbuffer = buffers
     fill!(buffer,zero(eltype(buffer)))
     fill!(buffer,zero(eltype(cbuffer)))
@@ -356,13 +360,13 @@ function _gemv_threaded!(C, K, target_tree, partition, B, T, p::Val{P}, buffers)
             length(node) == 0 && continue
             if isleaf(node)
                 @timeit_debug "P2P" _particles_to_particles!(Cthreads[id], K, target_tree, node, B, node)
-                @timeit_debug "P2M" _particles_to_interpolants!(node, K, B, p, buffer)
+                @timeit_debug "P2M" _particles_to_interpolants!(node, K, B, p, plan, buffer)
             else
-                @timeit_debug "I2I" _interpolants_to_interpolants(node, K, B, p, buffer, cbuffer)
+                @timeit_debug "I2I" _interpolants_to_interpolants(node, K, B, p, plan, buffer, cbuffer)
             end
         end
         for node in depth
-            _chebtransform!(node, p, buffer)
+            _chebtransform!(node, p, plan, buffer)
             @timeit_debug "M2P" _interpolants_to_particles!(C, K, target_tree, node, p, buffer)
         end
         cbuffer, buffer = buffer, cbuffer
@@ -373,7 +377,7 @@ function _gemv_threaded!(C, K, target_tree, partition, B, T, p::Val{P}, buffers)
     end
 end
 
-function _interpolants_to_interpolants(node::SourceTree{N,Td}, K, B, p::Val{P}, buff, cbuff) where {N,Td,P}
+function _interpolants_to_interpolants(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buff, cbuff) where {N,Td,P}
     for I in active_cone_idxs(node)
         rec = cone_domain(node, I)
         s = chebnodes(p, rec) # cheb points in parameter space
@@ -428,17 +432,21 @@ function _transfer_right(I,vals_left,buff,dict,::Val{P}) where {P}
     end
 end
 
-function _chebtransform!(node::SourceTree{N,Td}, ::Val{P}, buff) where {N,Td,P}
+function _chebtransform!(node::SourceTree{N,Td}, ::Val{P}, plan, buff) where {N,Td,P}
     for I in active_cone_idxs(node)
         vals = view(buff,conedata(node,I))
         # transform vals to coefs in place. Coefs will be used later when the
         # current node transfers its expansion to its parent
-        chebtransform_native!(reshape(vals,P...))
+        coefs = if _use_fftw()
+            chebtransform_fftw!(reshape(vals,P...), plan)
+        else
+            chebtransform_native!(reshape(vals,P...))
+        end
     end
     return node
 end
 
-function _particles_to_interpolants!(node::SourceTree{N,Td}, K, B, p::Val{P}, buff) where {N,Td,P}
+function _particles_to_interpolants!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buff) where {N,Td,P}
     Ypts = node |> root_elements
     for I in active_cone_idxs(node)
         rec = cone_domain(node, I)
