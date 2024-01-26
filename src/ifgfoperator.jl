@@ -1,4 +1,18 @@
 """
+    struct MulBuffer{T}
+
+Low-level structure used to hold the interpolation coefficients and values of
+the current and next level cone interpolants.
+
+The type paramter `T` is the type of the interpolant.
+"""
+struct MulBuffer{T}
+    current_coefs::Vector{T}
+    next_coefs::Vector{T}
+    plan::FFTW.FFTWPlan
+end
+
+"""
     struct IFGFOp{T} <: AbstractMatrix{T}
 
 High-level structure representing a linear operator with elements of type `T`
@@ -26,9 +40,8 @@ struct IFGFOp{T} <: AbstractMatrix{T}
     p::NTuple
     ds_func::Function
     adm_func::Function
-    plan::FFTW.FFTWPlan
     _source_tree_depth_partition
-    buffers
+    mulbuffers::Ref
 end
 
 # getters
@@ -40,6 +53,16 @@ source_tree(op::IFGFOp)        = op.source_tree
 polynomial_order(op::IFGFOp)   = op.p
 meshsize_func(op::IFGFOp)      = op.ds_func
 admissibility_func(op::IFGFOp) = op.adm_func
+
+function Base.getproperty(A::IFGFOp,s::Symbol)
+    if s == :plan
+        return A.mulbuffers[].plan
+    elseif s == :buffers
+        return (A.mulbuffers[].current_coefs, A.mulbuffers[].next_coefs)
+    else
+        getfield(A,s)
+    end
+end
 
 function Base.size(op::IFGFOp)
     sizeX = op |> target_tree |> root_elements |> length
@@ -94,8 +117,6 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     U, V = eltype(Xpoints), eltype(Ypoints)
     Tk = return_type(kernel, U, V) # kernel type
     isconcretetype(Tk) || error("unable to infer a concrete type for the kernel")
-    Td = _density_type_from_kernel_type(Tk) # density type
-    Ti = Base.promote_op(*,Tk,Td) # interpolant type
     # create source and target trees
     @timeit_debug "source tree initialization" begin
         source_tree = initialize_source_tree(; points=Ypoints, splitter)
@@ -109,41 +130,15 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
         order = estimate_interpolation_order(kernel, partition, ds_func, tol, (2, 2, 2))
     end
     p = order .+ 1
-    # create an fftw plan for the chebtransform. Since `Ti` may be an `SVector`, we plan on
-    # its element type and perform the FFT on each component
-    plan = FFTW.plan_r2r!(zeros(eltype(Ti), p), FFTW.REDFT00; flags=FFTW.PATIENT | FFTW.UNALIGNED)
     @timeit_debug "interaction list computation" begin
         _compute_interaction_list!(source_tree, target_tree, adm)
     end
     @timeit_debug "cone list computation" begin
         _compute_cone_list!(partition, Xpoints, Val(p), ds_func, threads)
     end
-    # preallocate buffers for holding all interpolation values/coefs and decide
-    # which memory is "owned" by each cone
-    buffers = _allocate_buffers!(partition,prod(p),Ti)
     # call main constructor
-    ifgf = IFGFOp{Tk}(kernel, target_tree, source_tree, p, ds_func, adm, plan, partition, buffers)
+    ifgf = IFGFOp{Tk}(kernel, target_tree, source_tree, p, ds_func, adm, partition, Ref{Any}(nothing))
     return ifgf
-end
-
-# memory need for forward map
-function _allocate_buffers!(partition,p,Tv)
-    nmax      = 0
-    for nodes in partition
-        istart = 0
-        iend   = 0
-        for node in nodes
-            for I in active_cone_idxs(node)
-                istart = iend   + 1
-                iend   = istart + p - 1
-                node.data.conedatadict[I] = istart:iend
-            end
-        end
-        nmax = max(nmax,iend)
-    end
-    buff1 = Vector{Tv}(undef,nmax)
-    buff2 = Vector{Tv}(undef,nmax)
-    return (buff1,buff2)
 end
 
 """
@@ -289,13 +284,25 @@ uses the internal indexing system of the `IFGFOp`, and therefore does not
 permute the vectors `x` and `y` to perform the multiplication.
 """
 function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOp, x::AbstractVector, a::Number, b::Number; global_index=true, threads=true)
+    partition = A._source_tree_depth_partition
     # since the IFGF represents A = Pr*K*Pc, where Pr and Pc are row and column
     # permutations, we need first to rewrite C <-- b*C + a*(Pc*H*Pb)*B as
     # C <-- Pr*(b*inv(Pr)*C + a*H*(Pc*B)). Following this rewrite, the
     # multiplication is performed by first defining B <-- Pc*B, and C <--
     # inv(Pr)*C, doing the multiplication with the permuted entries, and then
     # permuting the result  C <-- Pr*C at the end.
-    T = eltype(A)
+    TA = eltype(A)
+    # preallocate buffers for holding all interpolation values/coefs and decide
+    # which memory is "owned" by each cone
+    Tx = eltype(x)
+    Ty = Base.promote_op(*,TA,Tx) # interpolant type (same as output type)
+    if !isa(A.mulbuffers[],MulBuffer{Ty})
+        bufs = _allocate_buffers!(partition,prod(A.p),Ty)
+        # create an fftw plan for the chebtransform. Since `Ti` may be an `SVector`, we plan on
+        # its element type and perform the FFT on each component
+        plan = FFTW.plan_r2r!(zeros(eltype(Ty), A.p), FFTW.REDFT00; flags=FFTW.PATIENT | FFTW.UNALIGNED)
+        A.mulbuffers[] = MulBuffer(bufs[1], bufs[2], plan)
+    end
     rtree = target_tree(A)
     ctree = source_tree(A)
     # permute input
@@ -309,16 +316,18 @@ function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOp, x::AbstractVector, a::
     iszero(b) ? fill!(y, zero(eltype(y))) : rmul!(y, b)
     # extract the kernel and place a function barrier for heavy computation
     K = kernel(A)
-    partition = A._source_tree_depth_partition
+
     if threads
-        _gemv_threaded!(y, K, rtree, partition, x, T, Val(A.p),A.plan,A.buffers)
+        _gemv_threaded!(y, K, rtree, partition, x, TA, Val(A.p),A.plan,A.buffers)
     else
-        _gemv!(y, K, rtree, partition, x, T, Val(A.p),A.plan,A.buffers)
+        _gemv!(y, K, rtree, partition, x, TA, Val(A.p),A.plan,A.buffers)
     end
     # permute output
     global_index && invpermute!(y, loc2glob(rtree))
     return y
 end
+
+
 
 function LinearAlgebra.mul!(y::AbstractMatrix, A::IFGFOp, x::AbstractMatrix, a::Number, b::Number; global_index=true, threads=true)
     ncol = size(x,2)
@@ -326,6 +335,28 @@ function LinearAlgebra.mul!(y::AbstractMatrix, A::IFGFOp, x::AbstractMatrix, a::
         mul!(view(y,:,i),A,view(x,:,i),a,b;global_index,threads)
     end
     return y
+end
+
+
+
+# memory need for forward map
+function _allocate_buffers!(partition,p,Tv)
+    nmax      = 0
+    for nodes in partition
+        istart = 0
+        iend   = 0
+        for node in nodes
+            for I in active_cone_idxs(node)
+                istart = iend   + 1
+                iend   = istart + p - 1
+                node.data.conedatadict[I] = istart:iend
+            end
+        end
+        nmax = max(nmax,iend)
+    end
+    buff1 = Vector{Tv}(undef,nmax)
+    buff2 = Vector{Tv}(undef,nmax)
+    return (buff1,buff2)
 end
 
 function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) where {P}
