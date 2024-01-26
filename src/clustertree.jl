@@ -86,7 +86,12 @@ the (global) indexes used upon the construction of the tree.
 """
 loc2glob(clt::ClusterTree) = clt.loc2glob
 
-buffer(clt::ClusterTree) = clt.buffer
+"""
+    glob2loc(clt::ClusterTree)
+
+The inverse of [`loc2glob(clt)`](@ref).
+"""
+glob2loc(clt::ClusterTree) = clt.buffer
 
 """
     container_type(clt::ClusterTree)
@@ -147,12 +152,14 @@ function ClusterTree{D}(
     n = length(elements)
     irange = 1:n
     loc2glob = collect(irange)
-    buffer = collect(irange)
+    glob2loc = collect(irange) # used as a buffer during the construction
     children = nothing
     parent = nothing
     #build the root, then recurse
-    root = ClusterTree{D}(elements, bbox, irange, loc2glob, buffer, children, parent)
+    root = ClusterTree{D}(elements, bbox, irange, loc2glob, glob2loc, children, parent)
     _build_cluster_tree!(root, splitter, threads)
+    # inverse the loc2glob permutation
+    glob2loc .= invperm(loc2glob)
     # finally, permute the elements so as to use the local indexing
     copy!(elements, elements[loc2glob]) # faster than permute!
     return root
@@ -204,7 +211,7 @@ function _common_binary_split!(
 ) where {T,S,D}
     els = root_elements(cluster)
     l2g = loc2glob(cluster)
-    buf = buffer(cluster)
+    buf = glob2loc(cluster)
     irange = index_range(cluster)
     # get split data
     npts_left, npts_right, left_rec, right_rec, buff =
