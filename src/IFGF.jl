@@ -2,12 +2,14 @@ module IFGF
 
 const PROJECT_ROOT = pkgdir(IFGF)
 
-using LinearAlgebra
-using StaticArrays
-using TimerOutputs
-using Printf
+using DataFlowTasks
 using FFTW
+using LinearAlgebra
 using OrderedCollections
+using Printf
+using StaticArrays
+using Statistics: median
+using TimerOutputs
 
 import AbstractTrees
 import LinearAlgebra: mul!

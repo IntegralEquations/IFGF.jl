@@ -1,7 +1,6 @@
 using Test
 using IFGF
 using StaticArrays
-using BenchmarkTools
 using IFGF:
     chebeval_novec,
     chebeval_vec,
@@ -9,7 +8,6 @@ using IFGF:
     chebtransform_fftw!,
     chebtransform_native!,
     HyperRectangle
-using FFTW
 
 for T in (Float64, ComplexF64)
     for dim in 1:3

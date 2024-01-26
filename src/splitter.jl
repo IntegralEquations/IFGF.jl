@@ -40,7 +40,7 @@ Used to split an `N` dimensional `ClusterTree` into `2^N` children until at most
 
 ## See also: [`AbstractSplitter`](@ref)
 """
-Base.@kwdef struct DyadicSplitter <: AbstractSplitter
+@kwdef struct DyadicSplitter <: AbstractSplitter
     nmax::Int = 50
     keep_empty::Bool = false
 end
@@ -82,7 +82,7 @@ minimal axis-aligned boxes at the end.
 
 ## See also: [`AbstractSplitter`](@ref)
 """
-Base.@kwdef struct DyadicMinimalSplitter <: AbstractSplitter
+@kwdef struct DyadicMinimalSplitter <: AbstractSplitter
     nmax::Int = 50
     keep_empty::Bool = false
 end
@@ -102,7 +102,7 @@ function split!(parentcluster::ClusterTree, spl::DyadicMinimalSplitter)
         irange = index_range(cluster)
         isempty(irange) && continue
         els = (root_els[l2g[j]] for j in irange)
-        cluster.container = HyperRectangle(els, true)
+        cluster.container = bounding_box(els, true)
     end
     return parentcluster
 end
@@ -114,7 +114,7 @@ Similar to [`DyadicSplitter`](@ref), but splits nodes until a maximum `depth` is
 
 ## See also: [`AbstractSplitter`](@ref)
 """
-Base.@kwdef struct DyadicMaxDepthSplitter <: AbstractSplitter
+@kwdef struct DyadicMaxDepthSplitter <: AbstractSplitter
     depth::Int
     keep_empty::Bool = false
 end
@@ -136,7 +136,7 @@ end
 
 Used to split a `ClusterTree` in half along the largest axis.
 """
-Base.@kwdef struct GeometricSplitter <: AbstractSplitter
+@kwdef struct GeometricSplitter <: AbstractSplitter
     nmax::Int = 50
 end
 
@@ -157,7 +157,7 @@ end
 
 Like [`GeometricSplitter`](@ref), but shrinks the children's containters.
 """
-Base.@kwdef struct GeometricMinimalSplitter <: AbstractSplitter
+@kwdef struct GeometricMinimalSplitter <: AbstractSplitter
     nmax::Int = 50
 end
 
@@ -178,7 +178,7 @@ end
 """
     struct PrincipalComponentSplitter <: AbstractSplitter
 """
-Base.@kwdef struct PrincipalComponentSplitter <: AbstractSplitter
+@kwdef struct PrincipalComponentSplitter <: AbstractSplitter
     nmax::Int = 50
 end
 
@@ -225,7 +225,7 @@ amongst all children.
 
 ## See also: [`AbstractSplitter`](@ref)
 """
-Base.@kwdef struct CardinalitySplitter <: AbstractSplitter
+@kwdef struct CardinalitySplitter <: AbstractSplitter
     nmax::Int = 50
 end
 

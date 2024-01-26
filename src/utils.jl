@@ -287,3 +287,15 @@ function coords(x::T) where {T}
         error("type $T has no method nor field named `coords`.")
     end
 end
+
+# https://discourse.julialang.org/t/putting-threads-threads-or-any-macro-in-an-if-statement/41406/7
+macro usethreads(multithreaded, expr::Expr)
+    ex = quote
+        if $multithreaded
+            Threads.@threads $expr
+        else
+            $expr
+        end
+    end
+    return esc(ex)
+end

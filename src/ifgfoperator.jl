@@ -82,13 +82,14 @@ Construct an approximation of the matrix `[K(x,y) for x ∈ X, y ∈ Y]`. If the
 kernel function `K` is oscillatory, you should implement the method
 `wavenumber(::typeof(K)) --> Number` to return its wavenumber.
 
-The error in the approximation is controlled by two parameters: `Δs` and `order`.
+The error in the approximation is controlled by two parameters: `h` and `order`.
 These parameters dictate the mesh size and interpolation order of the parametric
 space used to build the cone interpolants. While the `order` is held constant
-across all source cells, the `Δs` parameter controls only the size of the *low-frequency*
-cells; for cells of large acoustic size, the mesh size is adapted so as to keep
-the interpolation error constant across different levels of the source tree (see
-[`cone_domain_size_func`](@ref) for implementation details).
+across all source cells, the `h` parameter controls only the size of the
+*low-frequency* cells; for cells of large acoustic size, the mesh size is
+adapted so as to keep the interpolation error constant across different levels
+of the source tree (see [`cone_domain_size_func`](@ref) for implementation
+details).
 
 If the keyword `order` is ommited, a tolerance `tol` must be passed. It will
 then be used to estimate an appropriate interpolation `order`.
@@ -108,7 +109,6 @@ function assemble_ifgf(
     tol      = 1e-4,
     order    = nothing,
     Δs       = 1.0,
-    threads  = true,
     splitter = DyadicSplitter(; nmax),
 )
     k = wavenumber(kernel)
@@ -136,7 +136,7 @@ function assemble_ifgf(
         _compute_interaction_list!(source_tree, target_tree, adm)
     end
     @timeit_debug "cone list computation" begin
-        _compute_cone_list!(partition, Xpoints, Val(p), ds_func, threads)
+        _compute_cone_list!(partition, Xpoints, Val(p), ds_func)
     end
     # call main constructor
     ifgf = IFGFOp{Tk}(
@@ -165,7 +165,7 @@ The `adm` function is called through `adm(target,source)` to determine if
 their children unless both are a leaves, in which case `target` is added to the
 `nearlist` of source.
 """
-function compute_interaction_list!(ifgf::IFGFOp, threads = false)
+function compute_interaction_list!(ifgf::IFGFOp)
     # TODO: threaded implementation of this pass
     _compute_interaction_list!(
         source_tree(ifgf),
@@ -227,25 +227,19 @@ the target points on its `farlist` as well as the interpolation points on its
 parent's cones. The `polynomial_order(ifgf)` and `meshsize_func(ifgf)` are used
 to construct the appropriate interpolation domains and points.
 """
-function compute_cone_list!(ifgf::IFGFOp, threads)
+function compute_cone_list!(ifgf::IFGFOp)
     p         = polynomial_order(ifgf)
     func      = meshsize_func(ifgf)
     X         = target_tree(ifgf) |> root_elements
     partition = ifgf._source_tree_depth_partition
-    _compute_cone_list!(partition, X, Val(p), func, threads)
+    _compute_cone_list!(partition, X, Val(p), func)
     return ifgf
 end
 
-function _compute_cone_list!(partition, X, p, func, threads)
+function _compute_cone_list!(partition, X, p, func)
     for depth in partition
-        if threads
-            Threads.@threads for node in depth
-                _initialize_cone_interpolants!(node, X, p, func)
-            end
-        else
-            for node in depth
-                _initialize_cone_interpolants!(node, X, p, func)
-            end
+        for node in depth
+            _initialize_cone_interpolants!(node, X, p, func)
         end
     end
     return partition
@@ -310,7 +304,6 @@ function LinearAlgebra.mul!(
     a::Number,
     b::Number;
     global_index = true,
-    threads = true,
 )
     partition = A._source_tree_depth_partition
     # since the IFGF represents A = Pr*K*Pc, where Pr and Pc are row and column
@@ -349,12 +342,7 @@ function LinearAlgebra.mul!(
     iszero(b) ? fill!(y, zero(eltype(y))) : rmul!(y, b)
     # extract the kernel and place a function barrier for heavy computation
     K = kernel(A)
-
-    if threads
-        _gemv_threaded!(y, K, rtree, partition, x, TA, Val(A.p), A.plan, A.buffers)
-    else
-        _gemv!(y, K, rtree, partition, x, TA, Val(A.p), A.plan, A.buffers)
-    end
+    _gemv!(y, K, rtree, partition, x, TA, Val(A.p), A.plan, A.buffers)
     # permute output
     global_index && invpermute!(y, loc2glob(rtree))
     return y
@@ -367,11 +355,10 @@ function LinearAlgebra.mul!(
     a::Number,
     b::Number;
     global_index = true,
-    threads = true,
 )
     ncol = size(x, 2)
     for i in 1:ncol
-        mul!(view(y, :, i), A, view(x, :, i), a, b; global_index, threads)
+        mul!(view(y, :, i), A, view(x, :, i), a, b; global_index)
     end
     return y
 end
@@ -434,68 +421,6 @@ function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) wh
             )
         end
         cbuffer, buffer = buffer, cbuffer
-    end
-end
-
-function _gemv_threaded!(
-    C,
-    K,
-    target_tree,
-    partition,
-    B,
-    T,
-    p::Val{P},
-    plan,
-    buffers,
-) where {P}
-    buffer, cbuffer = buffers
-    fill!(buffer, zero(eltype(buffer)))
-    fill!(buffer, zero(eltype(cbuffer)))
-    nt = Threads.nthreads()
-    Cthreads = [zero(C) for _ in 1:nt]
-    for depth in Iterators.reverse(partition)
-        fill!(buffer, zero(eltype(buffer)))
-        Threads.@threads for node in depth
-            id = Threads.threadid()
-            length(node) == 0 && continue
-            if isleaf(node)
-                @timeit_debug "P2P" _particles_to_particles!(
-                    Cthreads[id],
-                    K,
-                    target_tree,
-                    node,
-                    B,
-                    node,
-                )
-                @timeit_debug "P2M" _particles_to_interpolants!(node, K, B, p, plan, buffer)
-            else
-                @timeit_debug "I2I" _interpolants_to_interpolants(
-                    node,
-                    K,
-                    B,
-                    p,
-                    plan,
-                    buffer,
-                    cbuffer,
-                )
-            end
-        end
-        for node in depth
-            _chebtransform!(node, p, plan, buffer)
-            @timeit_debug "M2P" _interpolants_to_particles!(
-                C,
-                K,
-                target_tree,
-                node,
-                p,
-                buffer,
-            )
-        end
-        cbuffer, buffer = buffer, cbuffer
-    end
-    # reduction stage
-    for i in 1:nt
-        axpy!(1, Cthreads[i], C)
     end
 end
 
