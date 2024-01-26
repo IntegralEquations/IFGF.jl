@@ -61,25 +61,28 @@ Base.in(point, h::HyperRectangle) = all(low_corner(h) .<= point .<= high_corner(
 function vertices(rec::HyperRectangle{2})
     lc = low_corner(rec)
     hc = high_corner(rec)
-    return SVector(SVector(lc[1], lc[2]),
-                   SVector(hc[1], lc[2]),
-                   SVector(hc[1], hc[2]),
-                   SVector(lc[1], hc[2]))
+    return SVector(
+        SVector(lc[1], lc[2]),
+        SVector(hc[1], lc[2]),
+        SVector(hc[1], hc[2]),
+        SVector(lc[1], hc[2]),
+    )
 end
 function vertices(rec::HyperRectangle{3})
     lc = low_corner(rec)
     hc = high_corner(rec)
     return SVector(
-                   # lower face
-                   SVector(lc[1], lc[2], lc[3]),
-                   SVector(hc[1], lc[2], lc[3]),
-                   SVector(hc[1], hc[2], lc[3]),
-                   SVector(lc[1], hc[2], lc[3]),
-                   # upper face
-                   SVector(lc[1], lc[2], hc[3]),
-                   SVector(hc[1], lc[2], hc[3]),
-                   SVector(hc[1], hc[2], hc[3]),
-                   SVector(lc[1], hc[2], hc[3]))
+        # lower face
+        SVector(lc[1], lc[2], lc[3]),
+        SVector(hc[1], lc[2], lc[3]),
+        SVector(hc[1], hc[2], lc[3]),
+        SVector(lc[1], hc[2], lc[3]),
+        # upper face
+        SVector(lc[1], lc[2], hc[3]),
+        SVector(hc[1], lc[2], hc[3]),
+        SVector(hc[1], hc[2], hc[3]),
+        SVector(lc[1], hc[2], hc[3]),
+    )
 end
 
 """
@@ -87,16 +90,16 @@ end
 
 Minimal Euclidean distance between a point `x ∈ Ω₁` and `y ∈ Ω₂`.
 """
-function distance(rec1::HyperRectangle{N},
-                  rec2::HyperRectangle{N}) where {N}
+function distance(rec1::HyperRectangle{N}, rec2::HyperRectangle{N}) where {N}
     d2 = 0
     rec1_low_corner = low_corner(rec1)
     rec1_high_corner = high_corner(rec1)
     rec2_low_corner = low_corner(rec2)
     rec2_high_corner = high_corner(rec2)
     for i in 1:N
-        d2 += max(0, rec1_low_corner[i] - rec2_high_corner[i])^2 +
-              max(0, rec2_low_corner[i] - rec1_high_corner[i])^2
+        d2 +=
+            max(0, rec1_low_corner[i] - rec2_high_corner[i])^2 +
+            max(0, rec2_low_corner[i] - rec1_high_corner[i])^2
     end
     return sqrt(d2)
 end
@@ -151,7 +154,7 @@ Compute a [`HyperRectangle`](@ref) that contains the [`center`](@ref) of all ele
 
 Works for any type that implements `center`.
 """
-function bounding_box(els, cube=false)
+function bounding_box(els, cube = false)
     isempty(els) && (error("data cannot be empty"))
     lb = center(first(els))
     ub = center(first(els))

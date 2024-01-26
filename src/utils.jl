@@ -6,7 +6,7 @@ data (which are, in this case, computed only once).
 """
 function share_interp_data(mode = true)
     @eval _share_interp_data() = $mode
-    mode
+    return mode
 end
 _share_interp_data() = true
 
@@ -15,11 +15,11 @@ _share_interp_data() = true
 
 Use the [FFTW](http://www.fftw.org) library for computing the Chebyshev transform.
 """
-function use_fftw(mode=true)
+function use_fftw(mode = true)
     @eval _use_fftw() = $mode
-    mode
+    return mode
 end
-_use_fftw()          = false
+_use_fftw() = true
 
 """
     use_vectorized_chebeval(mode=true)
@@ -28,7 +28,7 @@ Use a vectorized version of the Chebyshev evaluation routine. Calling this
 function will redefine `chebeval` to point to either `chebeval_vec` or
 `chebeval_novec`, and thus may trigger code recompilation.
 """
-function use_vectorized_chebeval(mode=true)
+function use_vectorized_chebeval(mode = true)
     if mode
         @eval chebeval(args...) = chebeval_vec(args...)
     else
@@ -85,7 +85,7 @@ function cone_domain_size_func(k, ds)
         func = (node) -> begin
             bbox = IFGF.container(node)
             w    = maximum(high_corner(bbox) - low_corner(bbox))
-            δ    = max(k * w / 2,1)
+            δ    = max(k * w / 2, 1)
             ds ./ δ
         end
     end
@@ -96,17 +96,17 @@ function cone_domain_size_func(k, ds::Number)
     if k == 0
         func = (node) -> begin
             N = ambient_dimension(node)
-            ntuple(i->ds,N)
+            ntuple(i -> ds, N)
         end
     else
         # oscillatory case (e.g. Helmholtz, Maxwell)
         # k: wavenumber
         func = (node) -> begin
-            N  = ambient_dimension(node)
-            ds_tup = ntuple(i->ds,N)
+            N = ambient_dimension(node)
+            ds_tup = ntuple(i -> ds, N)
             bbox = IFGF.container(node)
-            w    = maximum(high_corner(bbox) - low_corner(bbox))
-            δ    = max(k * w / 2,1)
+            w = maximum(high_corner(bbox) - low_corner(bbox))
+            δ = max(k * w / 2, 1)
             ds_tup ./ δ
         end
     end
@@ -121,20 +121,20 @@ A target and source are admissible under the *modified admissiblility condition*
 the source box and `η >= 1` is an adjustable parameter. By default, `η = N /
 √N`, where `N` is the ambient dimension.
 """
-function modified_admissibility_condition(target,source,η)
+function modified_admissibility_condition(target, source, η)
     # compute distance between source center and target box
-    xc = source |> container |> center
-    h  = source |> container |> radius
+    xc   = source |> container |> center
+    h    = source |> container |> radius
     bbox = container(target)
     dc   = distance(xc, bbox)
     # if target box is outside a sphere of radius h*η, consider it admissible.
-    return dc > η*h
+    return dc > η * h
 end
 
-function modified_admissibility_condition(target,source)
+function modified_admissibility_condition(target, source)
     N = ambient_dimension(target)
     η = N / sqrt(N)
-    modified_admissibility_condition(target,source,η)
+    return modified_admissibility_condition(target, source, η)
 end
 
 """
@@ -149,7 +149,7 @@ function _density_type_from_kernel_type(T)
     if T <: Number
         return T
     elseif T <: Union{SMatrix,Adjoint}
-        m,n = size(T)
+        m, n = size(T)
         return SVector{n,eltype(T)}
     else
         error("kernel type $T not recognized")
@@ -162,7 +162,7 @@ end
 Given an `N` dimensional array of coefficients , estimate the relative error
 commited by the Chebyshev interpolant along dimension `dim`.
 """
-function cheb_error_estimate(coefs::AbstractArray{T,N},dim) where {T,N}
+function cheb_error_estimate(coefs::AbstractArray{T,N}, dim) where {T,N}
     sz = size(coefs)
     I  = ntuple(N) do d
         if d == dim
@@ -171,7 +171,7 @@ function cheb_error_estimate(coefs::AbstractArray{T,N},dim) where {T,N}
             1:sz[d]
         end
     end
-    norm(view(coefs,I...),2) / norm(coefs,2)
+    return norm(view(coefs, I...), 2) / norm(coefs, 2)
 end
 
 """
@@ -188,7 +188,7 @@ function wavenumber end
 Increment `I` by `n` along  the dimension `k`. This is equivalent to `I +=
 n*eₖ`, where `eₖ` is a vector with with `1` at the  `k`-th coordinate and zeros elsewhere.
 """
-function increment_index(I::CartesianIndex, dim::Integer, nb::Integer=1)
+function increment_index(I::CartesianIndex, dim::Integer, nb::Integer = 1)
     N = length(I)
     @assert 1 ≤ dim ≤ length(I)
     return I + CartesianIndex(ntuple(i -> i == dim ? nb : 0, N))
@@ -199,7 +199,7 @@ end
 
 Equivalent to [`increment_index`](@ref)(I,k,-n)
 """
-function decrement_index(I::CartesianIndex, dim::Integer, nb::Integer=1)
+function decrement_index(I::CartesianIndex, dim::Integer, nb::Integer = 1)
     N = length(I)
     @assert 1 ≤ dim ≤ length(I)
     return I + CartesianIndex(ntuple(i -> i == dim ? -nb : 0, N))
@@ -227,7 +227,7 @@ Recursive function to compute the depth of `node` in a a tree-like structure.
 Overload this function if your structure has a more efficient way to compute
 `depth` (e.g. if it stores it in a field).
 """
-function depth(tree, acc=0)
+function depth(tree, acc = 0)
     if isroot(tree)
         return acc
     else
@@ -252,7 +252,7 @@ function _partition_by_depth!(partition, tree, depth)
     if length(partition) < depth + 1
         push!(partition, [])
     end
-    length(tree) > 0 && push!(partition[depth + 1], tree)
+    length(tree) > 0 && push!(partition[depth+1], tree)
     for chd in children(tree)
         _partition_by_depth!(partition, chd, depth + 1)
     end

@@ -16,11 +16,11 @@ end
     struct IFGFOp{T} <: AbstractMatrix{T}
 
 High-level structure representing a linear operator with elements of type `T`
-with entry `i,j` given by `K(X[i],Y[j])`, where `K` is the underlying kernel
+and `i,j` entry given by `K(X[i],Y[j])`, where `K` is the underlying kernel
 function, and `X` and `Y` are the elements of the `target_tree` and
 `source_tree`, respectively.
 
-# Fields:
+## Fields:
 - `kernel` : underlying kernel function
 - `target_tree` : tree structure used for clustering the target points
 - `source_tree` : tree structure used for clustering the source points
@@ -54,13 +54,13 @@ polynomial_order(op::IFGFOp)   = op.p
 meshsize_func(op::IFGFOp)      = op.ds_func
 admissibility_func(op::IFGFOp) = op.adm_func
 
-function Base.getproperty(A::IFGFOp,s::Symbol)
+function Base.getproperty(A::IFGFOp, s::Symbol)
     if s == :plan
         return A.mulbuffers[].plan
     elseif s == :buffers
         return (A.mulbuffers[].current_coefs, A.mulbuffers[].next_coefs)
     else
-        getfield(A,s)
+        getfield(A, s)
     end
 end
 
@@ -72,7 +72,7 @@ end
 
 # disable getindex
 function Base.getindex(::IFGFOp, args...)
-    error("`getindex(::IFGFOp,args...)` has been intentionally disabled")
+    return error("`getindex(::IFGFOp,args...)` has been intentionally disabled")
 end
 
 """
@@ -99,17 +99,19 @@ target/source trees.
 The `adm` function gives a criterion to determine if the interaction between a
 target cell and a source cell should be computed using an interpolation scheme.
 """
-function assemble_ifgf(kernel, Xpoints, Ypoints;
-    nmax    = 100,
-    adm     = modified_admissibility_condition,
-    tol     = 1e-4,
-    order   = nothing,
-    Δs      = 1.0,
-    threads = true,
-    splitter= DyadicSplitter(;nmax)
-    )
-
-    k        = wavenumber(kernel)
+function assemble_ifgf(
+    kernel,
+    Xpoints,
+    Ypoints;
+    nmax     = 100,
+    adm      = modified_admissibility_condition,
+    tol      = 1e-4,
+    order    = nothing,
+    Δs       = 1.0,
+    threads  = true,
+    splitter = DyadicSplitter(; nmax),
+)
+    k = wavenumber(kernel)
     ds_func = cone_domain_size_func(k, Δs)
     # infer the type of the matrix, then compute the type of density to be
     # interpolated
@@ -119,7 +121,7 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
     isconcretetype(Tk) || error("unable to infer a concrete type for the kernel")
     # create source and target trees
     @timeit_debug "source tree initialization" begin
-        source_tree = initialize_source_tree(; points=Ypoints, splitter)
+        source_tree = initialize_source_tree(; points = Ypoints, splitter)
     end
     partition = partition_by_depth(source_tree)
     @timeit_debug "target tree initialization" begin
@@ -137,7 +139,16 @@ function assemble_ifgf(kernel, Xpoints, Ypoints;
         _compute_cone_list!(partition, Xpoints, Val(p), ds_func, threads)
     end
     # call main constructor
-    ifgf = IFGFOp{Tk}(kernel, target_tree, source_tree, p, ds_func, adm, partition, Ref{Any}(nothing))
+    ifgf = IFGFOp{Tk}(
+        kernel,
+        target_tree,
+        source_tree,
+        p,
+        ds_func,
+        adm,
+        partition,
+        Ref{Any}(nothing),
+    )
     return ifgf
 end
 
@@ -154,9 +165,13 @@ The `adm` function is called through `adm(target,source)` to determine if
 their children unless both are a leaves, in which case `target` is added to the
 `nearlist` of source.
 """
-function compute_interaction_list!(ifgf::IFGFOp, threads=false)
+function compute_interaction_list!(ifgf::IFGFOp, threads = false)
     # TODO: threaded implementation of this pass
-    _compute_interaction_list!(source_tree(ifgf), target_tree(ifgf), admissibility_func(ifgf))
+    _compute_interaction_list!(
+        source_tree(ifgf),
+        target_tree(ifgf),
+        admissibility_func(ifgf),
+    )
     return ifgf
 end
 
@@ -236,7 +251,12 @@ function _compute_cone_list!(partition, X, p, func, threads)
     return partition
 end
 
-function _initialize_cone_interpolants!(source::SourceTree{N}, X, p::Val{P}, ds_func) where {N,P}
+function _initialize_cone_interpolants!(
+    source::SourceTree{N},
+    X,
+    p::Val{P},
+    ds_func,
+) where {N,P}
     length(source) == 0 && (return source)
     ds = ds_func(source)
     # find minimal axis-aligned bounding box for interpolation points
@@ -283,7 +303,15 @@ Like the `mul!` function from `LinearAlgebra`. Setting `global_index=false`
 uses the internal indexing system of the `IFGFOp`, and therefore does not
 permute the vectors `x` and `y` to perform the multiplication.
 """
-function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOp, x::AbstractVector, a::Number, b::Number; global_index=true, threads=true)
+function LinearAlgebra.mul!(
+    y::AbstractVector,
+    A::IFGFOp,
+    x::AbstractVector,
+    a::Number,
+    b::Number;
+    global_index = true,
+    threads = true,
+)
     partition = A._source_tree_depth_partition
     # since the IFGF represents A = Pr*K*Pc, where Pr and Pc are row and column
     # permutations, we need first to rewrite C <-- b*C + a*(Pc*H*Pb)*B as
@@ -295,12 +323,17 @@ function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOp, x::AbstractVector, a::
     # preallocate buffers for holding all interpolation values/coefs and decide
     # which memory is "owned" by each cone
     Tx = eltype(x)
-    Ty = Base.promote_op(*,TA,Tx) # interpolant type (same as output type)
-    if !isa(A.mulbuffers[],MulBuffer{Ty})
-        bufs = _allocate_buffers!(partition,prod(A.p),Ty)
+    Ty = Base.promote_op(*, TA, Tx) # interpolant type (same as output type)
+    if !isa(A.mulbuffers[], MulBuffer{Ty})
+        @debug "creating buffer of type $Ty to perform multiplication"
+        bufs = _allocate_buffers!(partition, prod(A.p), Ty)
         # create an fftw plan for the chebtransform. Since `Ti` may be an `SVector`, we plan on
         # its element type and perform the FFT on each component
-        plan = FFTW.plan_r2r!(zeros(eltype(Ty), A.p), FFTW.REDFT00; flags=FFTW.PATIENT | FFTW.UNALIGNED)
+        plan = FFTW.plan_r2r!(
+            zeros(eltype(Ty), A.p),
+            FFTW.REDFT00;
+            flags = FFTW.PATIENT | FFTW.UNALIGNED,
+        )
         A.mulbuffers[] = MulBuffer(bufs[1], bufs[2], plan)
     end
     rtree = target_tree(A)
@@ -318,87 +351,145 @@ function LinearAlgebra.mul!(y::AbstractVector, A::IFGFOp, x::AbstractVector, a::
     K = kernel(A)
 
     if threads
-        _gemv_threaded!(y, K, rtree, partition, x, TA, Val(A.p),A.plan,A.buffers)
+        _gemv_threaded!(y, K, rtree, partition, x, TA, Val(A.p), A.plan, A.buffers)
     else
-        _gemv!(y, K, rtree, partition, x, TA, Val(A.p),A.plan,A.buffers)
+        _gemv!(y, K, rtree, partition, x, TA, Val(A.p), A.plan, A.buffers)
     end
     # permute output
     global_index && invpermute!(y, loc2glob(rtree))
     return y
 end
 
-
-
-function LinearAlgebra.mul!(y::AbstractMatrix, A::IFGFOp, x::AbstractMatrix, a::Number, b::Number; global_index=true, threads=true)
-    ncol = size(x,2)
+function LinearAlgebra.mul!(
+    y::AbstractMatrix,
+    A::IFGFOp,
+    x::AbstractMatrix,
+    a::Number,
+    b::Number;
+    global_index = true,
+    threads = true,
+)
+    ncol = size(x, 2)
     for i in 1:ncol
-        mul!(view(y,:,i),A,view(x,:,i),a,b;global_index,threads)
+        mul!(view(y, :, i), A, view(x, :, i), a, b; global_index, threads)
     end
     return y
 end
 
-
-
 # memory need for forward map
-function _allocate_buffers!(partition,p,Tv)
-    nmax      = 0
+function _allocate_buffers!(partition, p, Tv)
+    nmax = 0
     for nodes in partition
         istart = 0
         iend   = 0
         for node in nodes
             for I in active_cone_idxs(node)
-                istart = iend   + 1
-                iend   = istart + p - 1
+                istart = iend + 1
+                iend = istart + p - 1
                 node.data.conedatadict[I] = istart:iend
             end
         end
-        nmax = max(nmax,iend)
+        nmax = max(nmax, iend)
     end
-    buff1 = Vector{Tv}(undef,nmax)
-    buff2 = Vector{Tv}(undef,nmax)
-    return (buff1,buff2)
+    buff1 = Vector{Tv}(undef, nmax)
+    buff2 = Vector{Tv}(undef, nmax)
+    return (buff1, buff2)
 end
 
 function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) where {P}
-    buffer,cbuffer = buffers
+    buffer, cbuffer = buffers
     for depth in Iterators.reverse(partition)
-        fill!(buffer,zero(eltype(buffer)))
+        fill!(buffer, zero(eltype(buffer)))
         for node in depth
             length(node) == 0 && continue
             if isleaf(node)
-                @timeit_debug "P2P" _particles_to_particles!(C, K, target_tree, node, B, node)
+                @timeit_debug "P2P" _particles_to_particles!(
+                    C,
+                    K,
+                    target_tree,
+                    node,
+                    B,
+                    node,
+                )
                 @timeit_debug "P2I" _particles_to_interpolants!(node, K, B, p, plan, buffer)
             else
-                @timeit_debug "I2I" _interpolants_to_interpolants(node, K, B, p, plan, buffer, cbuffer)
+                @timeit_debug "I2I" _interpolants_to_interpolants(
+                    node,
+                    K,
+                    B,
+                    p,
+                    plan,
+                    buffer,
+                    cbuffer,
+                )
             end
             @timeit_debug "V2C" _chebtransform!(node, p, plan, buffer)
-            @timeit_debug "I2P" _interpolants_to_particles!(C, K, target_tree, node, p, buffer)
+            @timeit_debug "I2P" _interpolants_to_particles!(
+                C,
+                K,
+                target_tree,
+                node,
+                p,
+                buffer,
+            )
         end
         cbuffer, buffer = buffer, cbuffer
     end
 end
 
-function _gemv_threaded!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) where {P}
-    buffer,cbuffer = buffers
-    fill!(buffer,zero(eltype(buffer)))
-    fill!(buffer,zero(eltype(cbuffer)))
+function _gemv_threaded!(
+    C,
+    K,
+    target_tree,
+    partition,
+    B,
+    T,
+    p::Val{P},
+    plan,
+    buffers,
+) where {P}
+    buffer, cbuffer = buffers
+    fill!(buffer, zero(eltype(buffer)))
+    fill!(buffer, zero(eltype(cbuffer)))
     nt = Threads.nthreads()
     Cthreads = [zero(C) for _ in 1:nt]
     for depth in Iterators.reverse(partition)
-        fill!(buffer,zero(eltype(buffer)))
+        fill!(buffer, zero(eltype(buffer)))
         Threads.@threads for node in depth
             id = Threads.threadid()
             length(node) == 0 && continue
             if isleaf(node)
-                @timeit_debug "P2P" _particles_to_particles!(Cthreads[id], K, target_tree, node, B, node)
+                @timeit_debug "P2P" _particles_to_particles!(
+                    Cthreads[id],
+                    K,
+                    target_tree,
+                    node,
+                    B,
+                    node,
+                )
                 @timeit_debug "P2M" _particles_to_interpolants!(node, K, B, p, plan, buffer)
             else
-                @timeit_debug "I2I" _interpolants_to_interpolants(node, K, B, p, plan, buffer, cbuffer)
+                @timeit_debug "I2I" _interpolants_to_interpolants(
+                    node,
+                    K,
+                    B,
+                    p,
+                    plan,
+                    buffer,
+                    cbuffer,
+                )
             end
         end
         for node in depth
             _chebtransform!(node, p, plan, buffer)
-            @timeit_debug "M2P" _interpolants_to_particles!(C, K, target_tree, node, p, buffer)
+            @timeit_debug "M2P" _interpolants_to_particles!(
+                C,
+                K,
+                target_tree,
+                node,
+                p,
+                buffer,
+            )
         end
         cbuffer, buffer = buffer, cbuffer
     end
@@ -408,18 +499,26 @@ function _gemv_threaded!(C, K, target_tree, partition, B, T, p::Val{P}, plan, bu
     end
 end
 
-function _interpolants_to_interpolants(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buff, cbuff) where {N,Td,P}
+function _interpolants_to_interpolants(
+    node::SourceTree{N,Td},
+    K,
+    B,
+    p::Val{P},
+    plan,
+    buff,
+    cbuff,
+) where {N,Td,P}
     for I in active_cone_idxs(node)
         rec = cone_domain(node, I)
         s = chebnodes(p, rec) # cheb points in parameter space
         x = map(si -> interp2cart(si, node), s) # cheb points in physical space
-        vals = reshape(view(buff,conedata(node,I)),P)
+        vals = reshape(view(buff, conedata(node, I)), P)
         # check if left index Il exists. If so, the data shared between Il and I
         # will be handled by Il
         idxs = if _share_interp_data()
             ntuple(N) do dim
-                Il = decrement_index(I,dim)
-                haskey(conedatadict(node),Il) ? (1:P[dim]-1) : (1:P[dim])
+                Il = decrement_index(I, dim)
+                return haskey(conedatadict(node), Il) ? (1:P[dim]-1) : (1:P[dim])
                 # 1:P[dim]
             end |> CartesianIndices
         else
@@ -432,30 +531,30 @@ function _interpolants_to_interpolants(node::SourceTree{N,Td}, K, B, p::Val{P}, 
                 idxcone, si = cone_index(x[i], chd)
                 # transfer block's interpolant to parent's interpolants
                 rec = cone_domain(chd, idxcone)
-                coefs = view(cbuff,conedata(chd,idxcone))
+                coefs = view(cbuff, conedata(chd, idxcone))
                 vals[i] += transfer_factor(K, x[i], chd) * chebeval(coefs, si, rec, p)
             end
         end
         # copy the data to the cone on the right if it exists
         if _share_interp_data()
-            _transfer_right(I,vals,buff,conedatadict(node),p)
+            _transfer_right(I, vals, buff, conedatadict(node), p)
         end
     end
     return node
 end
 
 # transfer the data from a left cell to its right neighbors
-function _transfer_right(I,vals_left,buff,dict,::Val{P}) where {P}
+function _transfer_right(I, vals_left, buff, dict, ::Val{P}) where {P}
     N = length(P)
     for dim in 1:N
-        Ir = increment_index(I,dim)
-        if haskey(dict,Ir)
-            vals_right = reshape(view(buff,dict[Ir]),P)
+        Ir = increment_index(I, dim)
+        if haskey(dict, Ir)
+            vals_right = reshape(view(buff, dict[Ir]), P)
             # HACK: because the line below allocates (don't know why), we have
             # to build the indices manually to copy the data.
             # copy!(selectdim(vals_right,dim,P[dim]),selectdim(vals,dim,1))
-            idxs_left   = ntuple(i->i==dim ? (P[i]:P[i]) : 1:P[i],N) |> CartesianIndices
-            idxs_right  = ntuple(i->i==dim ? (1:1) : 1:P[i],N) |> CartesianIndices
+            idxs_left  = ntuple(i -> i == dim ? (P[i]:P[i]) : 1:P[i], N) |> CartesianIndices
+            idxs_right = ntuple(i -> i == dim ? (1:1) : 1:P[i], N) |> CartesianIndices
             for i in 1:length(idxs_left)
                 vals_right[idxs_left[i]] = vals_left[idxs_right[i]]
             end
@@ -465,27 +564,34 @@ end
 
 function _chebtransform!(node::SourceTree{N,Td}, ::Val{P}, plan, buff) where {N,Td,P}
     for I in active_cone_idxs(node)
-        vals = view(buff,conedata(node,I))
+        vals = view(buff, conedata(node, I))
         # transform vals to coefs in place. Coefs will be used later when the
         # current node transfers its expansion to its parent
         coefs = if _use_fftw()
-            chebtransform_fftw!(reshape(vals,P...), plan)
+            chebtransform_fftw!(reshape(vals, P...), plan)
         else
-            chebtransform_native!(reshape(vals,P...))
+            chebtransform_native!(reshape(vals, P...))
         end
     end
     return node
 end
 
-function _particles_to_interpolants!(node::SourceTree{N,Td}, K, B, p::Val{P}, plan, buff) where {N,Td,P}
+function _particles_to_interpolants!(
+    node::SourceTree{N,Td},
+    K,
+    B,
+    p::Val{P},
+    plan,
+    buff,
+) where {N,Td,P}
     Ypts = node |> root_elements
     for I in active_cone_idxs(node)
-        rec = cone_domain(node, I)
-        s = chebnodes(p, rec) # cheb points in parameter space
-        x = map(si -> interp2cart(si, node), s)
+        rec    = cone_domain(node, I)
+        s      = chebnodes(p, rec) # cheb points in parameter space
+        x      = map(si -> interp2cart(si, node), s)
         irange = 1:length(x)
         jrange = index_range(node)
-        vals   = view(buff,conedata(node,I))
+        vals   = view(buff, conedata(node, I))
         near_interaction!(vals, K, x, Ypts, B, irange, jrange)
         for i in eachindex(x)
             xi = x[i] # cartesian coordinate of node
@@ -495,14 +601,21 @@ function _particles_to_interpolants!(node::SourceTree{N,Td}, K, B, p::Val{P}, pl
     return node
 end
 
-function _interpolants_to_particles!(C, K, target_tree, node::SourceTree{N,T}, p::Val{P}, buff) where {N,T,P}
+function _interpolants_to_particles!(
+    C,
+    K,
+    target_tree,
+    node::SourceTree{N,T},
+    p::Val{P},
+    buff,
+) where {N,T,P}
     Xpts = target_tree |> root_elements
     for far_target in farlist(node)
         for i in index_range(far_target)
             x = Xpts[i]
             I, s = cone_index(coords(x), node)
-            rec  = cone_domain(node, I)
-            coefs    = view(buff,conedata(node,I))
+            rec = cone_domain(node, I)
+            coefs = view(buff, conedata(node, I))
             C[i] += centered_factor(K, Xpts[i], node) * chebeval(coefs, s, rec, p)
         end
     end
@@ -538,7 +651,6 @@ function near_interaction!(C, K, X, Y, σ, I, J)
     return C
 end
 
-
 # generic fallback. May need to be overloaded for specific kernels.
 """
     centered_factor(K,x,Y::SourceTree)
@@ -558,7 +670,7 @@ end
 Inverse of [`centered_factor`](@ref).
 """
 @inline function inv_centered_factor(K, x, Y)
-    inv(centered_factor(K, x, Y))
+    return inv(centered_factor(K, x, Y))
 end
 
 # generic fallback. May need to be overloaded for specific kernels.
@@ -592,7 +704,7 @@ function estimate_interpolation_order(kernel, partition, ds_func, tol, p)
                 @debug ers, p
                 if er > tol
                     p = ntuple(N) do i
-                        i == imax ? p[i] + 1 : p[i]
+                        return i == imax ? p[i] + 1 : p[i]
                     end
                 end
             end
@@ -608,7 +720,7 @@ function estimate_interpolation_error(kernel, node::SourceTree{N,T}, ds, p) wher
     # lb     = SVector(sqrt(N)/(2N),0,-π)
     ub = SVector(sqrt(N) / N, π, π)
     domain = HyperRectangle(lb, ub)
-    msh = UniformCartesianMesh(domain; step=ds)
+    msh = UniformCartesianMesh(domain; step = ds)
     els = ElementIterator(msh)
     # pick a random cone
     I = CartesianIndex((1, 1, 1))
@@ -627,18 +739,31 @@ function estimate_interpolation_error(kernel, node::SourceTree{N,T}, ds, p) wher
         xi = x[i] # cartesian coordinate of node
         vals[i] = inv_centered_factor(kernel, xi, node) * vals[i]
     end
-    coefs = _use_fftw() ? chebtransform_fftw!(reshape(vals, p...)) : chebtransform_native!(reshape(vals, p...))
-    ntuple(i -> cheb_error_estimate(coefs, i), N)
+    coefs = if _use_fftw()
+        chebtransform_fftw!(reshape(vals, p...))
+    else
+        chebtransform_native!(reshape(vals, p...))
+    end
+    return ntuple(i -> cheb_error_estimate(coefs, i), N)
 end
 
 function Base.show(io::IO, ifgf::IFGFOp)
-    println(io, "IFGFOp of $(eltype(ifgf)) with range $(rowrange(ifgf)) × $(colrange(ifgf))")
+    println(
+        io,
+        "IFGFOp of $(eltype(ifgf)) with range $(rowrange(ifgf)) × $(colrange(ifgf))",
+    )
     ctree = source_tree(ifgf)
     nodes = collect(AbstractTrees.PreOrderDFS(ctree))
     leaves = collect(AbstractTrees.Leaves(ctree))
     println(io, "\t number of nodes:                $(length(nodes))")
     println(io, "\t number of leaves:               $(length(leaves))")
-    println(io, "\t number of active cones:         $(sum(x->length(active_cone_idxs(x)),nodes))")
-    println(io, "\t maximum number of active cones: $(maximum(x->length(active_cone_idxs(x)),nodes))")
+    println(
+        io,
+        "\t number of active cones:         $(sum(x->length(active_cone_idxs(x)),nodes))",
+    )
+    return println(
+        io,
+        "\t maximum number of active cones: $(maximum(x->length(active_cone_idxs(x)),nodes))",
+    )
 end
 Base.show(io::IO, ::MIME"text/plain", ifgf::IFGFOp) = show(io, ifgf)

@@ -1,6 +1,6 @@
 module IFGF
 
-const PROJECT_ROOT =  pkgdir(IFGF)
+const PROJECT_ROOT = pkgdir(IFGF)
 
 using LinearAlgebra
 using StaticArrays

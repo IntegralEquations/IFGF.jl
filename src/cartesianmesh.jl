@@ -111,7 +111,7 @@ end
 function Base.getindex(m::UniformCartesianMesh, I...)
     return m[CartesianIndex(I)]
 end
-function Base.getindex(m::UniformCartesianMesh,i::Int)
+function Base.getindex(m::UniformCartesianMesh, i::Int)
     I = CartesianIndices(iter)
     return m[I[i]]
 end
