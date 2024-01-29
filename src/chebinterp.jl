@@ -159,11 +159,9 @@ end
 chebtransform1d!(vals) = chebtransform1d!(vals, copy(vals))
 
 """
-    chebeval(coefs,x,rec[,sz])
+    chebeval_novec(coefs,x,rec[,sz])
 
-Evaluate the Chebyshev polynomial defined on `rec` with coefficients given by
-`coefs` at the point `x`. If the size of `coefs` is known statically, its size
-can be passed as a `Val` using the `sz` argument.
+Implementation of [`chebeval`](@ref) using a Clenshaw summation without vectorization.
 """
 @fastmath function chebeval_novec(
     coefs,
@@ -223,6 +221,11 @@ statically which allows for various improvements by the compiler (like loop unro
     end
 end
 
+"""
+    chebeval_vec(coefs,x,rec[,sz])
+
+Implementation of [`chebeval`](@ref) using a Clenshaw summation wiht vectorization.
+"""
 @inline @fastmath function chebeval_vec(
     coefs,
     x::SVector{N,<:Real},

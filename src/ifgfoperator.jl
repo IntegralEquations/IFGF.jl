@@ -76,46 +76,55 @@ function Base.getindex(::IFGFOp, args...)
 end
 
 """
-    assemble_ifgf(K,X,Y;nmax=100,adm=modified_admissibility_condition,order=nothing,tol=1e-4,Δs=1.0,threads=true)
+    assemble_ifgf(
+        K, X, Y;
+        tol = nothing,
+        nmax = 100,
+        meshsize = 0.5,
+        order = nothing,
+        adm = modified_admissibility_condition,
+        splitter = DyadicSplitter(; nmax = 100)
+    )
 
 Construct an approximation of the matrix `[K(x,y) for x ∈ X, y ∈ Y]`. If the
 kernel function `K` is oscillatory, you should implement the method
 `wavenumber(::typeof(K)) --> Number` to return its wavenumber.
 
-The error in the approximation is controlled by two parameters: `h` and `order`.
-These parameters dictate the mesh size and interpolation order of the parametric
-space used to build the cone interpolants. While the `order` is held constant
-across all source cells, the `h` parameter controls only the size of the
+The error in the approximation is controlled by two parameters: `meshsize` and
+`order`. These parameters dictate (i) the size of the interpolation cones, and
+(ii) the interpolation order in each cone. While the `order` is held constant
+across all cones, the `meshsize` parameter controls only the size of the
 *low-frequency* cells; for cells of large acoustic size, the mesh size is
 adapted so as to keep the interpolation error constant across different levels
 of the source tree (see [`cone_domain_size_func`](@ref) for implementation
 details).
 
-If the keyword `order` is ommited, a tolerance `tol` must be passed. It will
-then be used to estimate an appropriate interpolation `order`.
+It is possible to pass a tolerance `tol`, in which case the `order` parameter is
+tuned so as to keep the error below `tol`. Note that either `tol` or `order`
+must be passed as an argument.
 
-`nmax` can be used to control the maximum number of points contained in the
-target/source trees.
-
-The `adm` function gives a criterion to determine if the interaction between a
-target cell and a source cell should be computed using an interpolation scheme.
+For a finer control over the constructed [`ClusterTree`](@ref)s and the
+corresponding near/far lists, you can pass directly an admissibility function
+`adm`, and a splitting strategy `splitter`. By default `splitter` constructs a
+[`DyadicSplitter`] with a maximum of `nmax` elements per leaf, and `adm` uses
+the [`modified_admissibility_condition`](@ref).
 """
 function assemble_ifgf(
     kernel,
     Xpoints,
     Ypoints;
-    nmax     = 100,
-    adm      = modified_admissibility_condition,
-    tol      = 1e-4,
-    order    = nothing,
-    Δs       = 1.0,
+    nmax = 100,
+    tol = nothing,
+    meshsize =  0.5,
+    order = nothing,
+    adm = modified_admissibility_condition,
     splitter = DyadicSplitter(; nmax),
 )
+    isnothing(tol) && isnothing(order) && error("must pass either `tol` or `order`")
     k = wavenumber(kernel)
-    ds_func = cone_domain_size_func(k, Δs)
+    ds_func = cone_domain_size_func(k, meshsize)
     # infer the type of the matrix, then compute the type of density to be
     # interpolated
-    @assert tol >= 0 "`tol` must be a positive real number"
     U, V = eltype(Xpoints), eltype(Ypoints)
     Tk = return_type(kernel, U, V) # kernel type
     isconcretetype(Tk) || error("unable to infer a concrete type for the kernel")
@@ -127,16 +136,18 @@ function assemble_ifgf(
     @timeit_debug "target tree initialization" begin
         target_tree = initialize_target_tree(; Xpoints, splitter)
     end
-    # if `order` is not passed explicitly, estimate it
-    if order === nothing
-        order = estimate_interpolation_order(kernel, partition, ds_func, tol, (2, 2, 2))
+    # if passed a tolerance, try to adhere to it
+    if !isnothing(tol)
+        p₀ = isnothing(order) ? (2, 2, 2) : order .+ 1
+        order = estimate_interpolation_order(kernel, partition, ds_func, tol, p₀)
+        @info "estimated interpolation order: $order"
     end
     p = order .+ 1
     @timeit_debug "interaction list computation" begin
         _compute_interaction_list!(source_tree, target_tree, adm)
     end
     @timeit_debug "cone list computation" begin
-        _compute_cone_list!(partition, Xpoints, Val(p), ds_func)
+        _compute_cone_list!(partition, Val(p), ds_func)
     end
     # call main constructor
     ifgf = IFGFOp{Tk}(
@@ -199,21 +210,21 @@ function _compute_interaction_list!(source::SourceTree, target::TargetTree, adm)
         # TODO: when both have children, how to recurse down? Two strategies
         # below:
         # strategy 1: recurse on children of largest box
-        if radius(source) > radius(target)
-            for source_child in children(source)
-                _compute_interaction_list!(source_child, target, adm)
-            end
-        else
-            for target_child in children(target)
-                _compute_interaction_list!(source, target_child, adm)
-            end
-        end
-        # strategy 2: recurse on children of both target and source
-        # for source_child in children(source)
+        # if radius(source) > radius(target)
+        #     for source_child in children(source)
+        #         _compute_interaction_list!(source_child, target, adm)
+        #     end
+        # else
         #     for target_child in children(target)
-        #         _compute_interaction_list!(source_child, target_child, adm)
+        #         _compute_interaction_list!(source, target_child, adm)
         #     end
         # end
+        # strategy 2: recurse on children of both target and source
+        for source_child in children(source)
+            for target_child in children(target)
+                _compute_interaction_list!(source_child, target_child, adm)
+            end
+        end
     end
 
     return nothing
@@ -230,16 +241,15 @@ to construct the appropriate interpolation domains and points.
 function compute_cone_list!(ifgf::IFGFOp)
     p         = polynomial_order(ifgf)
     func      = meshsize_func(ifgf)
-    X         = target_tree(ifgf) |> root_elements
     partition = ifgf._source_tree_depth_partition
-    _compute_cone_list!(partition, X, Val(p), func)
+    _compute_cone_list!(partition, Val(p), func)
     return ifgf
 end
 
-function _compute_cone_list!(partition, X, p, func)
+function _compute_cone_list!(partition, p, func)
     for depth in partition
-        for node in depth
-            _initialize_cone_interpolants!(node, X, p, func)
+        @usethreads for node in depth
+            _initialize_cone_interpolants!(node, p, func)
         end
     end
     return partition
@@ -247,7 +257,6 @@ end
 
 function _initialize_cone_interpolants!(
     source::SourceTree{N},
-    X,
     p::Val{P},
     ds_func,
 ) where {N,P}
@@ -329,8 +338,8 @@ function LinearAlgebra.mul!(
         )
         A.mulbuffers[] = MulBuffer(bufs[1], bufs[2], plan)
     end
-    rtree = target_tree(A)
-    ctree = source_tree(A)
+    rtree = target_tree(A) # row tree
+    ctree = source_tree(A) # column tree
     # permute input
     if global_index
         x = x[ctree.loc2glob]
@@ -342,7 +351,7 @@ function LinearAlgebra.mul!(
     iszero(b) ? fill!(y, zero(eltype(y))) : rmul!(y, b)
     # extract the kernel and place a function barrier for heavy computation
     K = kernel(A)
-    _gemv!(y, K, rtree, partition, x, TA, Val(A.p), A.plan, A.buffers)
+    _gemv!(y, K, rtree, partition, x, Val(A.p), A.mulbuffers[])
     # permute output
     global_index && invpermute!(y, loc2glob(rtree))
     return y
@@ -383,36 +392,40 @@ function _allocate_buffers!(partition, p, Tv)
     return (buff1, buff2)
 end
 
-function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) where {P}
-    buffer, cbuffer = buffers
+function _gemv!(C, K, target_tree, partition, B, p::Val{P}, mulbuffer) where {P}
+    cbuffer, buffer = mulbuffer.current_coefs, mulbuffer.next_coefs
+    plan = mulbuffer.plan
+    fill!(buffer, zero(eltype(buffer)))
+    fill!(buffer, zero(eltype(cbuffer)))
+    nt = Threads.nthreads()
+    Cthreads = [zero(C) for _ in 1:nt]
     for depth in Iterators.reverse(partition)
         fill!(buffer, zero(eltype(buffer)))
-        for node in depth
+        @usethreads for node in depth
+            id = Threads.threadid()
             length(node) == 0 && continue
             if isleaf(node)
                 @timeit_debug "P2P" _particles_to_particles!(
-                    C,
+                    Cthreads[id],
                     K,
                     target_tree,
                     node,
                     B,
                     node,
                 )
-                @timeit_debug "P2I" _particles_to_interpolants!(node, K, B, p, plan, buffer)
+                @timeit_debug "P2M" _particles_to_interpolants!(node, K, B, p, buffer)
             else
                 @timeit_debug "I2I" _interpolants_to_interpolants(
                     node,
                     K,
-                    B,
                     p,
-                    plan,
                     buffer,
                     cbuffer,
                 )
             end
-            @timeit_debug "V2C" _chebtransform!(node, p, plan, buffer)
-            @timeit_debug "I2P" _interpolants_to_particles!(
-                C,
+            _chebtransform!(node, p, plan, buffer)
+            @timeit_debug "M2P" _interpolants_to_particles!(
+                Cthreads[id],
                 K,
                 target_tree,
                 node,
@@ -422,14 +435,16 @@ function _gemv!(C, K, target_tree, partition, B, T, p::Val{P}, plan, buffers) wh
         end
         cbuffer, buffer = buffer, cbuffer
     end
+    # reduction stage
+    for i in 1:nt
+        axpy!(1, Cthreads[i], C)
+    end
 end
 
 function _interpolants_to_interpolants(
     node::SourceTree{N,Td},
     K,
-    B,
     p::Val{P},
-    plan,
     buff,
     cbuff,
 ) where {N,Td,P}
@@ -506,7 +521,6 @@ function _particles_to_interpolants!(
     K,
     B,
     p::Val{P},
-    plan,
     buff,
 ) where {N,Td,P}
     Ypts = node |> root_elements
@@ -611,15 +625,15 @@ end
 
 function estimate_interpolation_order(kernel, partition, ds_func, tol, p)
     @timeit_debug "estimate interpolation order" begin
-        nboxes = 20
-        # pick N random nodes at each deepest level and estimate the interpolation
-        # error by looking at the last chebyshev coefficients
-        # for nodes in partition
-        nodes = partition[end]
-        n = length(nodes)
+        leaves = partition[end]
+        n = length(leaves)
+        nboxes = min(100,n)
+        # pick N nodes at each deepest level and estimate the interpolation
+        # error by looking at the last chebyshev coefficients for nodes in
+        # partition
         Δn = n ÷ nboxes
         for i in 1:Δn:n
-            node = nodes[i]
+            node = leaves[i]
             er = Inf
             while er > tol
                 N = ambient_dimension(node)
@@ -646,10 +660,9 @@ function estimate_interpolation_error(kernel, node::SourceTree{N,T}, ds, p) wher
     ub = SVector(sqrt(N) / N, π, π)
     domain = HyperRectangle(lb, ub)
     msh = UniformCartesianMesh(domain; step = ds)
-    els = ElementIterator(msh)
     # pick a random cone
-    I = CartesianIndex((1, 1, 1))
-    rec = els[I]
+    I = rand(CartesianIndices(msh))
+    rec = msh[I]
     s = chebnodes(p, rec) # cheb points in parameter space
     x = map(si -> interp2cart(si, node), s)
     irange = 1:length(x)

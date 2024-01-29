@@ -1,6 +1,5 @@
 using LoopVectorization  # for automatically vectorizing some typical kernels
 using StaticArrays
-import WavePropBase as WPB
 
 const Point3D = SVector{3,Float64}
 
@@ -28,7 +27,9 @@ function _cube(n, w, center = (0, 0, 0), order = 0)
     if order == 0
         cov = identity
     else
-        cov = WPB.KressP(; order = order)
+        P   = order
+        v = (x) -> (1 / P - 1 / 2) * ((1 - 2x))^3 + 1 / P * ((2x - 1)) + 1 / 2
+        cov = (x) -> v(x)^P / (v(x)^P + v(1 - x)^P)
     end
     shift = Point3D(center) .- w / 2
     n1d = ceil(Int, sqrt(n / 6))

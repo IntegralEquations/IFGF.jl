@@ -36,11 +36,19 @@ function use_vectorized_chebeval(mode = true)
     end
     return nothing
 end
+
 # default choice
-chebeval(args...) = chebeval_vec(args...)
+"""
+    chebeval(coefs,x,rec[,sz])
+
+Evaluate the Chebyshev polynomial defined on `rec` with coefficients given by
+`coefs` at the point `x`. If the size of `coefs` is known statically, its size
+can be passed as a `Val` using the `sz` argument.
+"""
+chebeval(args...) = chebeval_novec(args...)
 
 """
-    @hprofile
+    @profile
 
 A macro which
 - resets the default `TimerOutputs.get_defaulttimer` to zero
@@ -51,7 +59,7 @@ This is useful as a coarse-grained profiling strategy to get a rough idea of
 where time is spent. Note that this relies on `TimerOutputs` annotations
 manually inserted in the code.
 """
-macro hprofile(block)
+macro profile(block)
     return quote
         TimerOutputs.enable_debug_timings(IFGF)
         reset_timer!()
@@ -288,10 +296,12 @@ function coords(x::T) where {T}
     end
 end
 
+# Inspired by
 # https://discourse.julialang.org/t/putting-threads-threads-or-any-macro-in-an-if-statement/41406/7
-macro usethreads(multithreaded, expr::Expr)
+# Modified so that the macro calls a pure function `usethreads`
+macro usethreads(expr::Expr)
     ex = quote
-        if $multithreaded
+        if usethreads()
             Threads.@threads $expr
         else
             $expr
@@ -299,3 +309,5 @@ macro usethreads(multithreaded, expr::Expr)
     end
     return esc(ex)
 end
+
+usethreads() = true

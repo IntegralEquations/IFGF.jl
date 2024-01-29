@@ -74,11 +74,11 @@ end
 
 function UniformCartesianMesh(domain::HyperRectangle{N}; step) where {N}
     msg = "`step` argument must be either a `Number` or an `NTuple{$N,<:Number}`"
-    step = step isa Number ? ntuple(i -> step, N) : step isa NTuple{N} ? step : error(msg)
+    step_ = step isa Number ? ntuple(i -> step, N) : length(step) == N ? step : error(msg)
     lc = low_corner(domain)
     hc = high_corner(domain)
     sz = ntuple(N) do i
-        return Int(ceil((hc[i] - lc[i]) / step[i]))
+        return Int(ceil((hc[i] - lc[i]) / step_[i]))
     end
     return UniformCartesianMesh(domain, sz)
 end

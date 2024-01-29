@@ -2,7 +2,6 @@ module IFGF
 
 const PROJECT_ROOT = pkgdir(IFGF)
 
-using DataFlowTasks
 using FFTW
 using LinearAlgebra
 using OrderedCollections
@@ -25,11 +24,6 @@ include("chebinterp.jl")
 include("ifgfoperator.jl")
 
 export
-    # types
-    IFGFOp,
-    ClusterTree,
     # methods
-    assemble_ifgf,
-    # macros
-    @hprofile
+    assemble_ifgf
 end
