@@ -163,7 +163,7 @@ chebtransform1d!(vals) = chebtransform1d!(vals, copy(vals))
 
 Implementation of [`chebeval`](@ref) using a Clenshaw summation without vectorization.
 """
-@fastmath function chebeval_novec(
+function chebeval_novec(
     coefs,
     x::SVector{N,<:Real},
     rec::HyperRectangle,
@@ -179,7 +179,7 @@ in the IFGF algorithm is typically a view of some larger array which is reused
 at different levels of the algorithn. We then pass the size of the coefficients
 statically which allows for various improvements by the compiler (like loop unrolling).
 =#
-@fastmath function _evaluate(x, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {dim,SZ}
+function _evaluate(x, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {dim,SZ}
     @inbounds n  = SZ[dim]
     @inbounds xd = x[dim]
     if dim == 1
@@ -226,7 +226,7 @@ end
 
 Implementation of [`chebeval`](@ref) using a Clenshaw summation wiht vectorization.
 """
-@inline @fastmath function chebeval_vec(
+function chebeval_vec(
     coefs,
     x::SVector{N,<:Real},
     rec::HyperRectangle,
@@ -237,7 +237,7 @@ Implementation of [`chebeval`](@ref) using a Clenshaw summation wiht vectorizati
     return _evaluate_vec(x0, coefs, sz)
 end
 
-@inline @fastmath function _evaluate_vec(x, coeffs, ::Val{SZ}) where {SZ}
+function _evaluate_vec(x, coeffs, ::Val{SZ}) where {SZ}
     N = length(x)
     T = eltype(coeffs)
     V = SVector{SZ[1],T}
@@ -248,13 +248,13 @@ end
     return _evaluate(x[1], f1d, Val{1}(), 1, SZ[1], Val(SZ[1:1]))
 end
 
-@inline @fastmath function chebeval_vecmat(coefs, x::SVector{N,<:Real}, rec, sz) where {N}
+function chebeval_vecmat(coefs, x::SVector{N,<:Real}, rec, sz) where {N}
     N == 1 && (return chebeval_novec(coefs, x, rec, sz))
     x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
     return _evaluate_vecmat(x0, coefs, sz)
 end
 
-@inline function _evaluate_vecmat(x, coeffs, ::Val{SZ}) where {SZ}
+function _evaluate_vecmat(x, coeffs, ::Val{SZ}) where {SZ}
     N      = length(SZ)
     T      = eltype(coeffs)
     SZ′    = SZ[1:end-1]
@@ -262,78 +262,3 @@ end
     c̃     = _evaluate(x[end], coeffs, Val{1}(), 1, SZ[N], Val(SZ[N:N]))
     return _evaluate(deleteat(x, N), c̃, Val{N - 1}(), 1, prod(SZ′), Val(SZ[1:N-1]))
 end
-
-# @fastmath function chebeval_vec(coefs,x::SVector{N,<:Real},rec::HyperRectangle,sz::Val{SZ}) where {N,SZ}
-#     x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
-#     T = eltype(coefs)
-#     buffers = ntuple(N-1) do d
-#         m = prod(SZ[1:d])
-#         b1 = @MArray zeros(T,m)
-#         b2 = @MArray zeros(T,m)
-#         b1,b2
-#     end
-#     # return buffers
-#     return _evaluate_vec(x0.data, coefs, sz, buffers)
-# end
-
-# function _evaluate_vec(x::NTuple,c,sz::Val{SZ},buffers) where {SZ}
-#     dim  = length(SZ)
-#     n    = SZ[1]
-#     sz′  = Val(SZ[1:dim-1])
-#     m    = prod(SZ[1:dim-1])
-#     if dim === 1
-#         x  = x[1]
-#         c₁ = c[1]
-#         # 1d case adapted from code at `FastChebInterp`, MIT License
-#         if n ≤ 2
-#             n == 1 && return c₁
-#             return muladd(x, c[2], c₁)
-#         end
-#         bₖ   = muladd(2x, c[n], c[n-1])
-#         bₖ₊₁ = oftype(bₖ, c[n])
-#         for j = n-3:-1:1
-#             bⱼ = muladd(2x, bₖ, c[1+j]) - bₖ₊₁
-#             bₖ, bₖ₊₁ = bⱼ, bₖ
-#         end
-#         return muladd(x, bₖ, c₁) - bₖ₊₁
-#     else
-#         # bₖ   = @MArray zeros(T,m)
-#         # bₖ₊₁ = @MArray zeros(T,m)
-#         bₖ,bₖ₊₁ = buffers[dim-1]
-#         c̃  = _reduce_last(x[dim],c,sz,bₖ,(bₖ₊₁))
-#         return _evaluate_vec(x[1:end-1],c̃,sz′,buffers)
-#     end
-# end
-
-# # sum over the last dimension of c, returning an abstract array of with size =
-# # size(c)[1:end-1]
-# function _reduce_last(x,c,sz::Val{SZ},bₖ,bₖ₊₁) where {SZ}
-#     n = SZ[end]
-#     m = prod(SZ[1:end-1])
-#     @inbounds bₖ₊₁ = copy!(bₖ₊₁,view(c,(n-1)*m+1:n*m))
-#     Δi   = (n-2)*m
-#     for i in 1:m
-#         @inbounds bₖ[i] = 2x*bₖ₊₁[i] + c[Δi+i]
-#     end
-#     for j = n-3:-1:1
-#         Δi = j*m
-#         for i in 1:m
-#             @inbounds bₖ₊₁[i] = muladd(2x,bₖ[i],c[Δi+i]) - bₖ₊₁[i]
-#         end
-#         bₖ, bₖ₊₁ = bₖ₊₁, bₖ
-#     end
-#     # last iteration
-#     for i in 1:m
-#         @inbounds bₖ₊₁[i] = muladd(x,bₖ[i],c[i]) - bₖ₊₁[i]
-#     end
-#     return bₖ₊₁
-# end
-
-# like selectdim(A,d=ndims(A),i)
-# selectlastdim(A::AbstractArray,i,sz) = selectdim(A,ndims(A),i)
-
-# function selectlastdim(c::AbstractVector,i::Int,sz::Val{SZ}) where {SZ}
-#     n = prod(SZ[1:end-1])
-#     idxs = (i*n-(n-1)):i*n
-#     view(c,idxs)
-# end
