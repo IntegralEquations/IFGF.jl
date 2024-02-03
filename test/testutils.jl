@@ -28,7 +28,7 @@ function _cube(n, w, center = (0, 0, 0), order = 0)
         cov = identity
     else
         P   = order
-        v = (x) -> (1 / P - 1 / 2) * ((1 - 2x))^3 + 1 / P * ((2x - 1)) + 1 / 2
+        v   = (x) -> (1 / P - 1 / 2) * ((1 - 2x))^3 + 1 / P * ((2x - 1)) + 1 / 2
         cov = (x) -> v(x)^P / (v(x)^P + v(1 - x)^P)
     end
     shift = Point3D(center) .- w / 2

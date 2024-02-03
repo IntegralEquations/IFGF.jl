@@ -44,9 +44,10 @@ const SourceTree{N,T} =
     ClusterTree{Vector{SVector{N,T}},HyperRectangle{N,T},SourceTreeData{N,T}}
 
 # getters for SourceTree
-msh(t::SourceTree)                            = t.data.msh
-conedatadict(t::SourceTree)                   = t.data.conedatadict
-active_cone_idxs(t::SourceTree)               = keys(conedatadict(t))
+msh(t::SourceTree)          = t.data.msh
+conedatadict(t::SourceTree) = t.data.conedatadict
+# FIXME: when getting the keys of the conedatadict, it is nice to have it as a vector
+active_cone_idxs(t::SourceTree)               = conedatadict(t).keys
 farlist(t::SourceTree)                        = t.data.farlist
 nearlist(t::SourceTree)                       = t.data.nearlist
 center(t::SourceTree)                         = t |> container |> center
@@ -58,15 +59,21 @@ _addtofarlist!(s::SourceTree, t::TargetTree)  = push!(farlist(s), t)
 _addtonearlist!(s::SourceTree, t::TargetTree) = push!(nearlist(s), t)
 
 """
-    _addnewcone!(node::SourceTree,I::CartesianIndex,p)
+    _addnewcone!(node::SourceTree,I::CartesianIndex[, lock])
 
 If `node` does not contain cone `I`, add it to the `conedict`. Does not set the
 indices of the interpolation data owned by the cone.
+
+If `lock` is passed, the operation is thread-safe.
 """
-function _addnewcone!(node::SourceTree, idxcone, ::Val{P}) where {P}
+function _addnewcone!(node::SourceTree, idxcone, lck)
     cd = conedatadict(node)
     if !haskey(cd, idxcone)
-        push!(cd, idxcone => -1:-1)
+        if isnothing(lck)
+            push!(cd, idxcone => -1:-1)
+        else
+            @lock lck push!(cd, idxcone => -1:-1)
+        end
     end
     return node
 end
@@ -182,17 +189,17 @@ function initialize_source_tree(; points::Vector{SVector{N,T}}, splitter) where 
 end
 
 """
-    compute_interpolation_domain(source::SourceTree)
+    interpolation_domain(source::SourceTree)
 
-Compute the minimal domain (as a `HyperRectangle`) in interpolation space for which
+Compute the domain (as a `HyperRectangle`) in interpolation space for which
 `source` must provide a covering through its cone interpolants.
 """
-function compute_interpolation_domain(source::SourceTree{N,Td}, ::Val{P}) where {N,Td,P}
+function interpolation_domain(source::SourceTree{N,Td}, ::Val{P}) where {N,Td,P}
     lb = svector(i -> typemax(Td), N) # lower bound
     ub = svector(i -> typemin(Td), N) # upper bound
     # nodes on far_list
     for far_target in farlist(source)
-        for x in elements(far_target) # target points
+        @usethreads for x in elements(far_target) # target points
             s  = cart2interp(x, source)
             lb = min.(lb, s)
             ub = max.(ub, s)
@@ -201,13 +208,13 @@ function compute_interpolation_domain(source::SourceTree{N,Td}, ::Val{P}) where 
     refnodes = chebnodes(P)
     if !isroot(source)
         source_parent = parent(source)
-        for I in active_cone_idxs(source_parent)
+        @usethreads for I in active_cone_idxs(source_parent)
             rec    = cone_domain(source_parent, I)
             lc, hc = low_corner(rec), high_corner(rec)
             c0     = (lc + hc) / 2
             c1     = (hc - lc) / 2
-            cheb   = map(x -> c0 + c1 .* x, refnodes)
-            for si in cheb
+            for ŝ in refnodes
+                si = c0 + c1 .* ŝ
                 # interpolation node in physical space
                 xi = interp2cart(si, source_parent)
                 s  = cart2interp(xi, source)

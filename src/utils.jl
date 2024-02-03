@@ -37,6 +37,22 @@ function use_vectorized_chebeval(mode = true)
     return nothing
 end
 
+"""
+    use_minimal_conedomain(mode=true)
+
+If set to `true`, the minimal domain for the cone interpolants will be used by
+calling [`interpolation_domain`](@ref) during the contruction of the active
+cones.
+
+While setting this to `true` reduces the memory footprint by creating
+fewer cones, it also increases the time to assemble the `IFGFOperator`.
+"""
+function use_minimal_conedomain(mode = true)
+    @eval _use_minimal_conedomain() = $mode
+    return mode
+end
+_use_minimal_conedomain() = true
+
 # default choice
 """
     chebeval(coefs,x,rec[,sz])
@@ -301,8 +317,19 @@ end
 # Modified so that the macro calls a pure function `usethreads`
 macro usethreads(expr::Expr)
     ex = quote
-        if usethreads()
+        if IFGF.usethreads()
             Threads.@threads $expr
+        else
+            $expr
+        end
+    end
+    return esc(ex)
+end
+
+macro usespawn(expr::Expr)
+    ex = quote
+        if IFGF.usethreads()
+            Threads.@spawn $expr
         else
             $expr
         end

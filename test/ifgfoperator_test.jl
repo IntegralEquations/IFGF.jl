@@ -87,7 +87,7 @@ end
     B      = rand(ny)
     B_mat  = rand(ny, nz)
     C      = zeros(nx)
-    A      = assemble_ifgf(K, Xpts, Ypts; order = p, meshsize=1)
+    A      = assemble_ifgf(K, Xpts, Ypts; order = p, meshsize = 1)
     mul!(C, A, B, 1, 0)
     @test size(A) == (nx, ny)
     @test C ≈ A_mat * B
@@ -95,7 +95,14 @@ end
     @test C == mul!(C, A, B, 1, 0) # recompute to verify that the result does not change
     @test bytes_ifgf == Base.summarysize(A)
     # pass a tolerance now
-    A = assemble_ifgf(K, Xpts, Ypts; tol=1e-12, meshsize=(1.0,1.0,1), order=(2,2,2))
+    A = assemble_ifgf(
+        K,
+        Xpts,
+        Ypts;
+        tol = 1e-12,
+        meshsize = (1.0, 1.0, 1),
+        order = (2, 2, 2),
+    )
     mul!(C, A, B, 1, 0)
     @test size(A) == (nx, ny)
     @test C ≈ A_mat * B

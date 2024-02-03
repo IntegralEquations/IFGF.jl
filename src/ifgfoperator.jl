@@ -115,7 +115,7 @@ function assemble_ifgf(
     Ypoints;
     nmax = 100,
     tol = nothing,
-    meshsize =  0.5,
+    meshsize = 0.5,
     order = nothing,
     adm = modified_admissibility_condition,
     splitter = DyadicSplitter(; nmax),
@@ -256,22 +256,29 @@ function _compute_cone_list!(partition, p, func)
 end
 
 function _initialize_cone_interpolants!(
-    source::SourceTree{N},
+    source::SourceTree{N,T},
     p::Val{P},
     ds_func,
-) where {N,P}
+) where {N,T,P}
     length(source) == 0 && (return source)
     ds = ds_func(source)
     # find minimal axis-aligned bounding box for interpolation points
-    domain = compute_interpolation_domain(source, p)
+    domain = if _use_minimal_conedomain()
+        interpolation_domain(source, p)
+    elseif N == 2
+        HyperRectangle{N,T}((1e-4, -π), (1, π))
+    elseif N == 3
+        HyperRectangle{N,T}((1e-4, 0, -π), (1, π, π))
+    end
     all(low_corner(domain) .< high_corner(domain)) || (return source)
     _init_msh!(source, domain, ds)
-    # if not a root, create all cones needed to cover interpolation points
-    # of parents
+    lck = usethreads() ? ReentrantLock() : nothing
+    # create all cones needed to cover interpolation points of parents
     refnodes = chebnodes(p)
     if !isroot(source)
         source_parent = parent(source)
-        for I in active_cone_idxs(source_parent)
+        @usethreads for I in active_cone_idxs(source_parent)
+            # @usespawn begin
             rec = cone_domain(source_parent, I)
             lc, hc = low_corner(rec), high_corner(rec)
             c0 = (lc + hc) / 2
@@ -284,15 +291,16 @@ function _initialize_cone_interpolants!(
                 # mesh index for interpolation point
                 I, _ = cone_index(xi, source)
                 # initialize cone if needed
-                _addnewcone!(source, I, p)
+                _addnewcone!(source, I, lck)
             end
+            # end
         end
     end
     # initialize all cones needed to cover far field.
     for far_target in farlist(source)
-        for x in elements(far_target) # target points
+        @usethreads for x in elements(far_target) # target points
             I, _ = cone_index(x, source)
-            _addnewcone!(source, I, p)
+            _addnewcone!(source, I, lck)
         end
     end
     sort!(conedatadict(source))
@@ -627,7 +635,7 @@ function estimate_interpolation_order(kernel, partition, ds_func, tol, p)
     @timeit_debug "estimate interpolation order" begin
         leaves = partition[end]
         n = length(leaves)
-        nboxes = min(100,n)
+        nboxes = min(100, n)
         # pick N nodes at each deepest level and estimate the interpolation
         # error by looking at the last chebyshev coefficients for nodes in
         # partition
@@ -695,13 +703,16 @@ function Base.show(io::IO, ifgf::IFGFOp)
     leaves = collect(AbstractTrees.Leaves(ctree))
     println(io, "\t number of nodes:                $(length(nodes))")
     println(io, "\t number of leaves:               $(length(leaves))")
-    println(
-        io,
-        "\t number of active cones:         $(sum(x->length(active_cone_idxs(x)),nodes))",
-    )
+    println(io, "\t number of active cones:         $(num_active_cones(ifgf))")
     return println(
         io,
         "\t maximum number of active cones: $(maximum(x->length(active_cone_idxs(x)),nodes))",
     )
 end
 Base.show(io::IO, ::MIME"text/plain", ifgf::IFGFOp) = show(io, ifgf)
+
+function num_active_cones(ifgf::IFGFOp)
+    ctree = source_tree(ifgf)
+    nodes = collect(AbstractTrees.PreOrderDFS(ctree))
+    return sum(x -> length(active_cone_idxs(x)), nodes)
+end

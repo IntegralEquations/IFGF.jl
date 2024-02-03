@@ -24,6 +24,6 @@ include("chebinterp.jl")
 include("ifgfoperator.jl")
 
 export
-    # methods
+# methods
     assemble_ifgf
 end
