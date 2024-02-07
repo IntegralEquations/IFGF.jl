@@ -88,7 +88,7 @@ function assemble_ifgf(
     nmax = 100,
     splitter = DyadicSplitter(; nmax),
     adm = nothing,
-    h = 0.5,
+    h = nothing,
     p = nothing,
 )
 U, V = eltype(target), eltype(source)
@@ -102,8 +102,8 @@ U, V = eltype(target), eltype(source)
         # require both h and p
         isnothing(h) || isnothing(p) && error("you must pass either tol or h and p as keyword arguments")
     else
-        isnothing(h) || (h = nothing) && @warn "ignoring h since a tolerance was passed"
-        isnothing(p) || (p = nothing) && @warn "ignoring p since a tolerance was passed"
+        isnothing(h) || (h = nothing; @warn "ignoring h since a tolerance was passed")
+        isnothing(p) || (p = nothing; @warn "ignoring p since a tolerance was passed")
     end
     # 3. Create an admissibility condition unless one is passed
     adm = isnothing(adm) ? modified_admissibility_condition : adm
@@ -111,13 +111,7 @@ U, V = eltype(target), eltype(source)
     Ytree = initialize_source_tree(source, splitter)
     partition = partition_by_depth(Ytree)
     Xtree = initialize_target_tree(target, splitter)
-    ## Interaction list.
-    # The parameter `nmin` is the minimum number of points below which all
-    # interactions are considered near
-    nmin = isnothing(p) ? 20 : prod(p)
-    _compute_interaction_list!(Ytree, Xtree, adm, nmin)
-    ## Cone lists
-    # Finally compute the active cones. Because we use a closed interpolation
+    # Because we use a closed interpolation
     # rule, we need to ensure that s ∈ [smin,1], where smin
     # > 0 (and not zero, otherwise there will be an interpolation point at
     # infinity, and special care is needed to give a sense to that). Here s =
@@ -132,17 +126,17 @@ U, V = eltype(target), eltype(source)
     elseif N == 3
         HyperRectangle{N,Td}((smin, 0, -π), (1, π, π))
     end
-    # We finally need the the function that computes a cone meshsize given a
-    # node, and the number of interpolation points per dimension. In the case a
-    # tolerance was passed, that takes priority and we try to find some "good"
-    # candidates for `p` and `h`. We apply a simple heuristic for choosing `p`,
-    # and an adaptive procedure for chosing `h` after, whereas we estimate the
+    # We need the the function that computes a cone meshsize given a node, and
+    # the number of interpolation points per dimension. In the case a tolerance
+    # was passed, that takes priority and we try to find some "good" candidates
+    # for `p` and `h`. We apply a simple heuristic for choosing `p`, and an
+    # adaptive procedure for chosing `h` after, whereas we estimate the
     # interpolaton order by looking at the last chebyshev coefficients in a few
     # of the nodes expansions.
-    k       = wavenumber(kernel)
+    k = wavenumber(kernel)
     if !isnothing(tol)
         h = N == 2 ? (1,π/2) : (1, π/2, π/2)
-        p = tol > 1e-2 ? ntuple(i -> 4, N) : tol ≥ 1e-8 ? ntuple(i -> 8, N) : ntuple(i -> 12, N)
+        p = tol ≥ 1e-4 ? ntuple(i -> 4, N) : tol ≥ 1e-8 ? ntuple(i -> 8, N) : ntuple(i -> 12, N)
         while true
             ds_func = cone_domain_size_func(k, h)
             ntrials = 100
@@ -154,7 +148,7 @@ U, V = eltype(target), eltype(source)
                 estimate_interpolation_error(kernel, node, msh, p)
             end
             imax = argmax(ers)
-            @debug "Estimating h and p:" h, p, ers, imax
+            @info "Estimating h and p:" h, p, ers, imax
             if maximum(ers) > tol
                 h = ntuple(i-> i == imax ? h[i] / 2 : h[i], N)
             else
@@ -164,6 +158,13 @@ U, V = eltype(target), eltype(source)
     end
     @info "---Cones meshsize           = " h
     @info "---Number of interp. points = " p
+    ## Interaction list.
+    # The parameter `nmin` is the minimum number of points below which all
+    # interactions are considered near
+    nmin = prod(p)
+    _compute_interaction_list!(Ytree, Xtree, adm, nmin)
+    ## Cone lists
+    # Finally compute the active cones.
     ds_func = cone_domain_size_func(k, h)
     _compute_cone_list!(partition, Val(p), ds_func, interp_domain)
     # call main constructor
