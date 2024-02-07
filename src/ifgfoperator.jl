@@ -61,11 +61,14 @@ function Base.getindex(::IFGFOp, args...)
 end
 
 """
-    assemble_ifgf(K, X, Y; h, p, splitter, adm)
+    assemble_ifgf(K, X, Y; tol, nmax=250)
+    assemble_ifgf(K, X, Y; h, p, nmax=250)
 
-Construct an approximation of the matrix `[K(x,y) for x ∈ X, y ∈ Y]`. You should
-implement the method `wavenumber(::typeof(K)) --> Number` to kernel's (typical)
-wavenumber. For non-oscillatory kernels, `wavenumber` should return `0`.
+Construct an approximation of the matrix `[K(x,y) for x ∈ X, y ∈ Y]` using the
+[interpolated factored Green function method](https://arxiv.org/abs/2010.02857)
+
+The kernel `K` must implement `wavenumber(::typeof(K)) --> Number` to return the
+kernel's (typical) wavenumber; for non-oscillatory kernels this is zero.
 
 The parameters `h` and `p` control the error in the approximation: `h` controls
 the size of the interpolation cones, while `p` gives the number of Chebyshev
@@ -73,13 +76,10 @@ nodes used for the interpolation in each dimension. Either increasing `p` or
 decreasing `h` will decrease the error in the approximation at the cost of
 increased computational time.
 
-`splitter` specifies the strategy used to partition the points in the source and
-target trees (see the subtypes of [`AbstractSplitter`](@ref) for options).
+A `tol` parameter can be passed in lieu of `h` and `p`. In this case, the
+parameters `h` and `p` are estimated based on some heuristic.
 
-`adm` is used to construct the near and far lists for each node in the source
-tree: calling `adm(t,s)` should return `true` if the interaction between `t` and
-`s` can be approximated by the underlying interpolatory scheme, and `false`
-otherwise.
+`nmax` gives the maximum number of points in a leaf of the dyadic trees used.
 """
 function assemble_ifgf(
     kernel,
@@ -87,10 +87,11 @@ function assemble_ifgf(
     source;
     tol = nothing,
     nmax = 100,
-    splitter = DyadicSplitter(; nmax),
-    η = nothing,
     h = nothing,
     p = nothing,
+    # advanced parameters, not documented in the docstring
+    η = nothing,
+    splitter = DyadicSplitter(; nmax),
 )
     U, V = eltype(target), eltype(source)
     Tk = return_type(kernel, U, V) # kernel type
