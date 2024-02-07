@@ -272,7 +272,7 @@ function _initialize_cone_interpolants!(
     end
     all(low_corner(domain) .< high_corner(domain)) || (return source)
     _init_msh!(source, domain, ds)
-    lck = usethreads() ? ReentrantLock() : nothing
+    lck = _usethreads() ? ReentrantLock() : nothing
     # create all cones needed to cover interpolation points of parents
     refnodes = chebnodes(p)
     if !isroot(source)

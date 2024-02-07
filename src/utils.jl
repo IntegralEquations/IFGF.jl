@@ -38,6 +38,15 @@ function use_vectorized_chebeval(mode = true)
 end
 
 """
+    chebeval(coefs,x,rec[,sz])
+
+Evaluate the Chebyshev polynomial defined on `rec` with coefficients given by
+`coefs` at the point `x`. If the size of `coefs` is known statically, its size
+can be passed as a `Val` using the `sz` argument.
+"""
+chebeval(args...) = chebeval_novec(args...)
+
+"""
     use_minimal_conedomain(mode=true)
 
 If set to `true`, the minimal domain for the cone interpolants will be used by
@@ -52,16 +61,6 @@ function use_minimal_conedomain(mode = true)
     return mode
 end
 _use_minimal_conedomain() = true
-
-# default choice
-"""
-    chebeval(coefs,x,rec[,sz])
-
-Evaluate the Chebyshev polynomial defined on `rec` with coefficients given by
-`coefs` at the point `x`. If the size of `coefs` is known statically, its size
-can be passed as a `Val` using the `sz` argument.
-"""
-chebeval(args...) = chebeval_novec(args...)
 
 """
     @profile
@@ -312,12 +311,22 @@ function coords(x::T) where {T}
     end
 end
 
+"""
+    usethreads(mode=true)
+
+Enable/disable thread usage globally for the `IFGF` module.
+"""
+function usethreads(mode = true)
+    @eval _usethreads() = $mode
+end
+_usethreads() = true
+
 # Inspired by
 # https://discourse.julialang.org/t/putting-threads-threads-or-any-macro-in-an-if-statement/41406/7
 # Modified so that the macro calls a pure function `usethreads`
 macro usethreads(expr::Expr)
     ex = quote
-        if IFGF.usethreads()
+        if IFGF._usethreads()
             Threads.@threads $expr
         else
             $expr
@@ -328,7 +337,7 @@ end
 
 macro usespawn(expr::Expr)
     ex = quote
-        if IFGF.usethreads()
+        if IFGF._usethreads()
             Threads.@spawn $expr
         else
             $expr
@@ -336,5 +345,3 @@ macro usespawn(expr::Expr)
     end
     return esc(ex)
 end
-
-usethreads() = true
