@@ -8,7 +8,9 @@ function share_interp_data(mode = true)
     @eval _share_interp_data() = $mode
     return mode
 end
-_share_interp_data() = true
+# FIXME: this option only works in serial due to a "bug" when transfering the
+# nodes to the right neighbor in parallel.
+_share_interp_data() = false
 
 """
     use_fftw(mode=true)
@@ -60,28 +62,7 @@ function use_minimal_conedomain(mode = true)
     @eval _use_minimal_conedomain() = $mode
     return mode
 end
-_use_minimal_conedomain() = true
-
-"""
-    @profile
-
-A macro which
-- resets the default `TimerOutputs.get_defaulttimer` to zero
-- execute the code block
-- print the profiling details
-
-This is useful as a coarse-grained profiling strategy to get a rough idea of
-where time is spent. Note that this relies on `TimerOutputs` annotations
-manually inserted in the code.
-"""
-macro profile(block)
-    return quote
-        TimerOutputs.enable_debug_timings(IFGF)
-        reset_timer!()
-        $(esc(block))
-        print_timer()
-    end
-end
+_use_minimal_conedomain() = false
 
 # fast invsqrt code taken from here
 # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-julia-8.html

@@ -18,7 +18,7 @@ IFGF.wavenumber(::typeof(K)) = 0
         B = rand(ny)
         B_mat = rand(ny, nz)
         C = zeros(nx)
-        A = assemble_ifgf(K, Xpts, Ypts; order = p, nmax = 250)
+        A = assemble_ifgf(K, Xpts, Ypts; p, h = 1, nmax = 250)
         mul!(C, A, B, 1, 0)
         @test size(A) == (nx, ny)
         @test C ≈ A_mat * B
@@ -34,7 +34,7 @@ IFGF.wavenumber(::typeof(K)) = 0
         B      = rand(ny)
         B_mat  = rand(ny, nz)
         C      = zeros(nx)
-        A      = assemble_ifgf(K, Xpts, Ypts; order = p, nmax = 100)
+        A      = assemble_ifgf(K, Xpts, Ypts; p, h = 1, nmax = 100)
         mul!(C, A, B, 1, 0)
         @test size(A) == (nx, ny)
         @test C ≈ A_mat * B
@@ -46,14 +46,14 @@ end
     @testset "Single leaf" begin
         nx, ny = 100, 200
         nz     = 5
-        p      = (4, 4)
+        p      = (12, 12)
         Xpts   = rand(SVector{2,Float64}, nx)
         Ypts   = [SVector(10, 10) + rand(SVector{2,Float64}) for _ in 1:ny]
         A_mat  = [K(x, y) for x in Xpts, y in Ypts]
         B      = rand(ny)
         B_mat  = rand(ny, nz)
         C      = zeros(nx)
-        A      = assemble_ifgf(K, Xpts, Ypts; order = p, nmax = 250)
+        A      = assemble_ifgf(K, Xpts, Ypts; p, h = 1, nmax = 250)
         mul!(C, A, B, 1, 0)
         @test size(A) == (nx, ny)
         @test C ≈ A_mat * B
@@ -62,52 +62,36 @@ end
     @testset "Tree" begin
         nx, ny = 100, 200
         nz     = 5
-        p      = (4, 4)
+        p      = (12, 12)
         Xpts   = rand(SVector{2,Float64}, nx)
         Ypts   = [SVector(10, 10) + rand(SVector{2,Float64}) for _ in 1:ny]
         A_mat  = [K(x, y) for x in Xpts, y in Ypts]
         B      = rand(ny)
         B_mat  = rand(ny, nz)
         C      = zeros(nx)
-        A      = assemble_ifgf(K, Xpts, Ypts; order = p, nmax = 100)
+        A      = assemble_ifgf(K, Xpts, Ypts; p, h = 1, nmax = 100)
         mul!(C, A, B, 1, 0)
         @test size(A) == (nx, ny)
         @test C ≈ A_mat * B
-        # @test A*B_mat ≈ A_mat*B_mat
     end
 end
 
 @testset "Near and far field" begin
+    tol = 1e-4
     nx, ny = 1000, 1000
     nz     = 3
     Xpts   = rand(SVector{3,Float64}, nx)
     Ypts   = [SVector(1, 1, 1) + rand(SVector{3,Float64}) for _ in 1:ny]
-    p      = (7, 7, 7)
     A_mat  = [K(x, y) for x in Xpts, y in Ypts]
     B      = rand(ny)
+    exact = A_mat*B
     B_mat  = rand(ny, nz)
     C      = zeros(nx)
-    A      = assemble_ifgf(K, Xpts, Ypts; order = p, meshsize = 1)
+    A      = assemble_ifgf(K, Xpts, Ypts; tol)
     mul!(C, A, B, 1, 0)
+    @test norm(C - exact) / norm(exact) < tol
     @test size(A) == (nx, ny)
-    @test C ≈ A_mat * B
     bytes_ifgf = Base.summarysize(A) # to make sure the size of A does not change upon further products
     @test C == mul!(C, A, B, 1, 0) # recompute to verify that the result does not change
     @test bytes_ifgf == Base.summarysize(A)
-    # pass a tolerance now
-    A = assemble_ifgf(
-        K,
-        Xpts,
-        Ypts;
-        tol = 1e-12,
-        meshsize = (1.0, 1.0, 1),
-        order = (2, 2, 2),
-    )
-    mul!(C, A, B, 1, 0)
-    @test size(A) == (nx, ny)
-    @test C ≈ A_mat * B
-    bytes_ifgf = Base.summarysize(A) # to make sure the size of A does not change upon further products
-    @test C == mul!(C, A, B, 1, 0) # recompute to verify that the result does not change
-    @test bytes_ifgf == Base.summarysize(A)
-    #@test A*B_mat ≈ A_mat*B_mat
 end

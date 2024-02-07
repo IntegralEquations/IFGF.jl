@@ -61,7 +61,7 @@ function Base.getindex(::IFGFOp, args...)
 end
 
 """
-    assemble_ifgf(K, X, Y, h, p, splitter, adm)
+    assemble_ifgf(K, X, Y; h, p, splitter, adm)
 
 Construct an approximation of the matrix `[K(x,y) for x ∈ X, y ∈ Y]`. You should
 implement the method `wavenumber(::typeof(K)) --> Number` to kernel's (typical)
@@ -92,7 +92,7 @@ function assemble_ifgf(
     h = nothing,
     p = nothing,
 )
-U, V = eltype(target), eltype(source)
+    U, V = eltype(target), eltype(source)
     Tk = return_type(kernel, U, V) # kernel type
     isconcretetype(Tk) || error("unable to infer a concrete type for the kernel")
     N, Td = length(U), eltype(U)
@@ -101,7 +101,7 @@ U, V = eltype(target), eltype(source)
     p = isa(p,Number) ? ntuple(i -> p, N) : p
     if isnothing(tol)
         # require both h and p
-        isnothing(h) || isnothing(p) && error("you must pass either tol or h and p as keyword arguments")
+        !isnothing(h) && !isnothing(p) || error("you must pass either tol or h and p as keyword arguments")
     else
         isnothing(h) || (h = nothing; @warn "ignoring h since a tolerance was passed")
         isnothing(p) || (p = nothing; @warn "ignoring p since a tolerance was passed")
@@ -143,7 +143,7 @@ U, V = eltype(target), eltype(source)
         p = tol ≥ 1e-4 ? ntuple(i -> 3, N) : tol ≥ 1e-8 ? ntuple(i -> 6, N) : ntuple(i -> 9, N)
         while true
             ds_func = cone_domain_size_func(k, h)
-            ntrials = 50
+            ntrials = 100
             ers = sum(1:ntrials) do i
                 depth = rand(partition)
                 # depth = partition[end]
@@ -421,6 +421,7 @@ end
     for i in 1:nt
         axpy!(1, Cthreads[i], C)
     end
+    return C
 end
 
 function _interpolants_to_interpolants(
