@@ -34,6 +34,7 @@ mutable struct IFGFOp{T} <: AbstractMatrix{T}
     const target_tree::TargetTree
     const source_tree::SourceTree
     const p::NTuple
+    const h::NTuple
     const _source_tree_depth_partition
     mulbuffer::Union{Nothing, MulBuffer}
 end
@@ -87,7 +88,7 @@ function assemble_ifgf(
     tol = nothing,
     nmax = 100,
     splitter = DyadicSplitter(; nmax),
-    adm = nothing,
+    η = nothing,
     h = nothing,
     p = nothing,
 )
@@ -106,7 +107,8 @@ U, V = eltype(target), eltype(source)
         isnothing(p) || (p = nothing; @warn "ignoring p since a tolerance was passed")
     end
     # 3. Create an admissibility condition unless one is passed
-    adm = isnothing(adm) ? modified_admissibility_condition : adm
+    η = isnothing(η) ? N / sqrt(N) : η
+    adm = (t,s) -> modified_admissibility_condition(t,s,η)
     ## Trees creation
     Ytree = initialize_source_tree(source, splitter)
     partition = partition_by_depth(Ytree)
@@ -121,10 +123,11 @@ U, V = eltype(target), eltype(source)
     )
     hmin = minimum(radius, partition[end])
     smin = hmin / rmax
+    smax = 1/η
     interp_domain = if N == 2
-        HyperRectangle{N,Td}((smin, -π), (1, π))
+        HyperRectangle{N,Td}((smin, -π), (smax, π))
     elseif N == 3
-        HyperRectangle{N,Td}((smin, 0, -π), (1, π, π))
+        HyperRectangle{N,Td}((smin, 0, -π), (smax, π, π))
     end
     # We need the the function that computes a cone meshsize given a node, and
     # the number of interpolation points per dimension. In the case a tolerance
@@ -135,29 +138,36 @@ U, V = eltype(target), eltype(source)
     # of the nodes expansions.
     k = wavenumber(kernel)
     if !isnothing(tol)
-        h = N == 2 ? (1,π/2) : (1, π/2, π/2)
-        p = tol ≥ 1e-4 ? ntuple(i -> 4, N) : tol ≥ 1e-8 ? ntuple(i -> 8, N) : ntuple(i -> 12, N)
+        h = ntuple(i-> i==1 ? (smax - smin) + eps() : π/2 + eps(), N)
+        # h = ntuple(i->1, N)
+        p = tol ≥ 1e-4 ? ntuple(i -> 3, N) : tol ≥ 1e-8 ? ntuple(i -> 6, N) : ntuple(i -> 9, N)
         while true
             ds_func = cone_domain_size_func(k, h)
-            ntrials = 100
-            ers = maximum(1:ntrials) do i
+            ntrials = 50
+            ers = sum(1:ntrials) do i
                 depth = rand(partition)
+                # depth = partition[end]
                 node  = rand(depth)
-                ds = ds_func(node)
-                msh = UniformCartesianMesh(interp_domain; step = ds)
-                estimate_interpolation_error(kernel, node, msh, p)
-            end
+                ds    = ds_func(node)
+                msh   = UniformCartesianMesh(interp_domain; step = ds)
+                estimate_interpolation_error(kernel, node, msh, p) |> SVector
+            end / ntrials
             imax = argmax(ers)
-            @info "Estimating h and p:" h, p, ers, imax
             if maximum(ers) > tol
-                h = ntuple(i-> i == imax ? h[i] / 2 : h[i], N)
+                # h = ntuple(i-> i == imax ? h[i] / 2 : h[i], N)
+                p = if imax == 1
+                    ntuple(i-> i == 1 ? p[i] + 1 : p[i], N)
+                else
+                    ntuple(i-> i == 1 ? p[i] : p[i] + 1, N)
+                end
             else
+                @debug "Estimated error per dimension: $(ers)"
                 break
             end
         end
     end
-    @info "---Cones meshsize           = " h
-    @info "---Number of interp. points = " p
+    @debug "---Cones meshsize           = " h
+    @debug "---Number of interp. points = " p
     ## Interaction list.
     # The parameter `nmin` is the minimum number of points below which all
     # interactions are considered near
@@ -168,7 +178,7 @@ U, V = eltype(target), eltype(source)
     ds_func = cone_domain_size_func(k, h)
     _compute_cone_list!(partition, Val(p), ds_func, interp_domain)
     # call main constructor
-    ifgf = IFGFOp{Tk}(kernel, Xtree, Ytree, p, partition, nothing)
+    ifgf = IFGFOp{Tk}(kernel, Xtree, Ytree, p, h, partition, nothing)
     return ifgf
 end
 
@@ -479,11 +489,12 @@ function _chebtransform!(node::SourceTree{N,Td}, ::Val{P}, plan, buff) where {N,
         vals = view(buff, conedata(node, I))
         # transform vals to coefs in place. Coefs will be used later when the
         # current node transfers its expansion to its parent
-        if _use_fftw()
+        coefs = if _use_fftw()
             chebtransform_fftw!(reshape(vals, P...), plan)
         else
             chebtransform_native!(reshape(vals, P...))
         end
+        # @info ntuple(i->cheb_error_estimate(coefs, i),N)
     end
     return node
 end
@@ -593,34 +604,6 @@ Ratio between the centered factor of `Y` and the centered factor of its parent.
 function transfer_factor(K, x, Y)
     yparent = parent(Y)
     return inv_centered_factor(K, x, yparent) * centered_factor(K, x, Y)
-end
-
-function estimate_interpolation_order(kernel, partition, ds_func, tol, p)
-    leaves = partition[end]
-    n = length(leaves)
-    nboxes = min(100, n)
-    # pick N nodes at each deepest level and estimate the interpolation
-    # error by looking at the last chebyshev coefficients for nodes in
-    # partition
-    Δn = n ÷ nboxes
-    for i in 1:Δn:n
-        node = leaves[i]
-        er = Inf
-        while er > tol
-            N = ambient_dimension(node)
-            ds = ds_func(node)
-            ers = estimate_interpolation_error(kernel, node, ds, p)
-            er, imax = findmax(ers)
-            @debug ers, p
-            if er > tol
-                p = ntuple(N) do i
-                    return i == imax ? p[i] + 1 : p[i]
-                end
-            end
-        end
-    end
-    order = p .- 1
-    return order
 end
 
 function estimate_interpolation_error(kernel, node::SourceTree{N,T}, msh, p) where {N,T}
