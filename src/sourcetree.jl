@@ -182,7 +182,7 @@ constructor (i.e. `data = SourceTreeData()`).
 - `points`: vector of source points.
 - `splitter`: splitting strategy.
 """
-function initialize_source_tree(; points::Vector{SVector{N,T}}, splitter) where {N,T}
+function initialize_source_tree(points::Vector{SVector{N,T}}, splitter) where {N,T}
     source_tree_datatype = SourceTreeData{N,T}
     source_tree          = ClusterTree{source_tree_datatype}(points, splitter)
     return source_tree

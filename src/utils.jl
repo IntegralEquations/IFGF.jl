@@ -180,24 +180,6 @@ function _density_type_from_kernel_type(T)
 end
 
 """
-    cheb_error_estimate(coefs::AbstractArray{T,N},dim)
-
-Given an `N` dimensional array of coefficients , estimate the relative error
-commited by the Chebyshev interpolant along dimension `dim`.
-"""
-function cheb_error_estimate(coefs::AbstractArray{T,N}, dim) where {T,N}
-    sz = size(coefs)
-    I  = ntuple(N) do d
-        if d == dim
-            sz[d]:sz[d]
-        else
-            1:sz[d]
-        end
-    end
-    return norm(view(coefs, I...), 2) / norm(coefs, 2)
-end
-
-"""
     wavenumber(K::Function)
 
 For oscillatory kernels, return the characteristic wavenumber (i.e `2π` divided

@@ -14,7 +14,7 @@ const TargetTree{N,T} = ClusterTree{Vector{SVector{N,T}},HyperRectangle{N,T},Not
 Create the tree-structure for clustering the target `points` using the splitting
 strategy of `splitter`. Returns a [`TargetTree`](@ref)
 """
-function initialize_target_tree(; Xpoints, splitter)
-    target_tree = ClusterTree(Xpoints, splitter)
+function initialize_target_tree(points, splitter)
+    target_tree = ClusterTree(points, splitter)
     return target_tree
 end
