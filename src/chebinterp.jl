@@ -42,14 +42,14 @@ end
 
 function chebnodes(p::NTuple)
     nodes1d = map(i -> chebnodes(i), p)
-    iter    = Iterators.product(nodes1d...)
+    iter = Iterators.product(nodes1d...)
     return iter
 end
 
 @generated function chebnodes(::Val{P}) where {P}
     nodes1d = map(i -> chebnodes(i), P)
-    iter    = Iterators.product(nodes1d...)
-    nodes   = SVector.(collect(iter))
+    iter = Iterators.product(nodes1d...)
+    nodes = SVector.(collect(iter))
     if prod(P) < 1e3
         nodes = SArray{Tuple{P...}}(nodes)
     end
@@ -58,17 +58,17 @@ end
 
 function chebnodes(p::Val{P}, rec::HyperRectangle) where {P}
     refnodes = chebnodes(p)
-    lc, hc   = low_corner(rec), high_corner(rec)
-    c0       = (lc + hc) / 2
-    c1       = (hc - lc) / 2
+    lc, hc = low_corner(rec), high_corner(rec)
+    c0 = (lc + hc) / 2
+    c1 = (hc - lc) / 2
     return map(x -> c0 + c1 .* x, refnodes)
 end
 
 function chebnodes(p::NTuple, rec::HyperRectangle)
     refnodes = chebnodes(p)
-    lc, hc   = low_corner(rec), high_corner(rec)
-    c0       = (lc + hc) / 2
-    c1       = (hc - lc) / 2
+    lc, hc = low_corner(rec), high_corner(rec)
+    c0 = (lc + hc) / 2
+    c1 = (hc - lc) / 2
     return map(x -> c0 + c1 .* x, refnodes)
 end
 
@@ -179,8 +179,57 @@ in the IFGF algorithm is typically a view of some larger array which is reused
 at different levels of the algorithn. We then pass the size of the coefficients
 statically which allows for various improvements by the compiler (like loop unrolling).
 =#
-function _evaluate(x, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {dim,SZ}
-    @inbounds n  = SZ[dim]
+@inline @fastmath function _evaluate(x, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {dim,SZ}
+    @inbounds n = SZ[dim]
+    @inbounds xd = x[dim]
+    if dim == 1
+        @inbounds c₁ = c[i1]
+        if n ≤ 2
+            n == 1 && return c₁ + one(xd) * zero(c₁)
+            return muladd(xd, c[i1+1], c₁)
+        end
+        @inbounds bₖ = muladd(2xd, c[i1+(n-1)], c[i1+(n-2)])
+        @inbounds bₖ₊₁ = oftype(bₖ, c[i1+(n-1)])
+        for j in n-3:-1:1
+            @inbounds bⱼ = muladd(2xd, bₖ, c[i1+j]) - bₖ₊₁
+            bₖ, bₖ₊₁ = bⱼ, bₖ
+        end
+        return muladd(xd, bₖ, c₁) - bₖ₊₁
+    else
+        Δi = len ÷ n # column-major stride of current dimension
+
+        # we recurse downward on dim for cache locality,
+        # since earlier dimensions are contiguous
+        dim′ = Val{dim - 1}()
+
+        c₁ = _evaluate(x, c, dim′, i1, Δi, sz)
+        if n ≤ 2
+            n == 1 && return c₁ + one(xd) * zero(c₁)
+            c₂ = _evaluate(x, c, dim′, i1 + Δi, Δi, sz)
+            return c₁ + xd * c₂
+        end
+        cₙ₋₁ = _evaluate(x, c, dim′, i1 + (n - 2) * Δi, Δi, sz)
+        cₙ = _evaluate(x, c, dim′, i1 + (n - 1) * Δi, Δi, sz)
+        bₖ = muladd(2xd, cₙ, cₙ₋₁)
+        bₖ₊₁ = oftype(bₖ, cₙ)
+        for j in n-3:-1:1
+            cⱼ = _evaluate(x, c, dim′, i1 + j * Δi, Δi, sz)
+            bⱼ = muladd(2xd, bₖ, cⱼ) - bₖ₊₁
+            bₖ, bₖ₊₁ = bⱼ, bₖ
+        end
+        return muladd(xd, bₖ, c₁) - bₖ₊₁
+    end
+end
+
+@inline @fastmath function _evaluate_vec(
+    x,
+    c,
+    ::Val{dim},
+    i1,
+    len,
+    sz::Val{SZ},
+) where {dim,SZ}
+    @inbounds n = SZ[dim]
     @inbounds xd = x[dim]
     if dim == 1
         @inbounds c₁ = c[i1]
@@ -226,7 +275,7 @@ end
 
 Implementation of [`chebeval`](@ref) using a Clenshaw summation wiht vectorization.
 """
-function chebeval_vec(
+@fastmath @inline function chebeval_vec(
     coefs,
     x::SVector{N,<:Real},
     rec::HyperRectangle,
@@ -237,14 +286,14 @@ function chebeval_vec(
     return _evaluate_vec(x0, coefs, sz)
 end
 
-function _evaluate_vec(x, coeffs, ::Val{SZ}) where {SZ}
+@fastmath @inline function _evaluate_vec(x, coeffs, ::Val{SZ}) where {SZ}
     N = length(x)
     T = eltype(coeffs)
     V = SVector{SZ[1],T}
-    n = length(coeffs) ÷ SZ[1]
-    # coeffs_ = reinterpret(V,coeffs)
-    coeffs_ = unsafe_wrap(Array, reinterpret(Ptr{V}, pointer(coeffs)), n)
-    f1d = _evaluate(deleteat(x, 1), coeffs_, Val{N - 1}(), 1, n, Val(SZ[2:end]))
+    n = prod(SZ) ÷ SZ[1]
+    coeffs_ = reinterpret(V, coeffs)
+    # coeffs_ = unsafe_wrap(Array, reinterpret(Ptr{V}, pointer(coeffs)), n)
+    f1d = _evaluate(deleteat(x, 1), coeffs_, Val{N - 1}(), 1, n, Val{SZ[2:end]}())
     return _evaluate(x[1], f1d, Val{1}(), 1, SZ[1], Val(SZ[1:1]))
 end
 
@@ -255,10 +304,30 @@ function chebeval_vecmat(coefs, x::SVector{N,<:Real}, rec, sz) where {N}
 end
 
 function _evaluate_vecmat(x, coeffs, ::Val{SZ}) where {SZ}
-    N      = length(SZ)
-    T      = eltype(coeffs)
-    SZ′    = SZ[1:end-1]
-    coeffs = reinterpret(SVector{prod(SZ′),T}, coeffs)
-    c̃     = _evaluate(x[end], coeffs, Val{1}(), 1, SZ[N], Val(SZ[N:N]))
+    N = length(SZ)
+    T = eltype(coeffs)
+    SZ′ = SZ[1:end-1]
+    V = SVector{prod(SZ′),T}
+    coeffs_ = reinterpret(V, coeffs)
+    # coeffs_ = unsafe_wrap(Array, reinterpret(Ptr{V}, pointer(coeffs)), SZ[end])
+    c̃ = _evaluate(x[end], coeffs_, Val{1}(), 1, SZ[N], Val(SZ[N:N]))
     return _evaluate(deleteat(x, N), c̃, Val{N - 1}(), 1, prod(SZ′), Val(SZ[1:N-1]))
+end
+
+"""
+    cheb_error_estimate(coefs::AbstractArray{T,N},dim)
+
+Given an `N` dimensional array of coefficients , estimate the relative error
+commited by the Chebyshev interpolant along dimension `dim`.
+"""
+function cheb_error_estimate(coefs::AbstractArray{T,N}, dim) where {T,N}
+    sz = size(coefs)
+    I = ntuple(N) do d
+        if d == dim
+            sz[d]:sz[d]
+        else
+            1:sz[d]
+        end
+    end
+    return norm(view(coefs, I...), 2) / norm(coefs, 2)
 end
