@@ -2,15 +2,15 @@
 
 *A Julia implementation of the [Interpolated Factored Green Function Method](https://arxiv.org/abs/2010.02857)*
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://WaveProp.github.io/IFGF.jl/stable)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://WaveProp.github.io/IFGF.jl/dev)
-[![Build Status](https://github.com/WaveProp/IFGF.jl/workflows/CI/badge.svg)](https://github.com/WaveProp/IFGF.jl/actions)
-[![Coverage](https://codecov.io/gh/WaveProp/IFGF.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/WaveProp/IFGF.jl)
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://IntegralEquations.github.io/IFGF.jl/stable)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://IntegralEquations.github.io/IFGF.jl/dev)
+[![Build Status](https://github.com/IntegralEquations/IFGF.jl/workflows/CI/badge.svg)](https://github.com/IntegralEquations/IFGF.jl/actions)
+[![Coverage](https://codecov.io/gh/IntegralEquations/IFGF.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/IntegralEquations/IFGF.jl)
 
 ## Installation
 Install from the Pkg REPL:
 ```
-pkg> add https://github.com/WaveProp/IFGF.jl
+pkg> add https://github.com/IntegralEquations/IFGF.jl
 ```
 
 ## Overview
@@ -31,32 +31,37 @@ matrix:
 
 ```julia
 using IFGF, LinearAlgebra, StaticArrays
+import IFGF: wavenumber
+
 # random points on a cube
 const Point3D = SVector{3,Float64}
 m,n = 100_000, 100_000
 X,Y = rand(Point3D,m), rand(Point3D,n)
-# define the kernel function
+
+# define a the kernel matrix
 struct HelmholtzMatrix <: AbstractMatrix{ComplexF64}
     X::Vector{Point3D}
     Y::Vector{Point3D}
     k::Float64
 end
 
-IFGF.wavenumber(A::HelmholtzMatrix) = A.k
-
-# abstract matrix interface
-Base.size(A::HelmholtzMatrix) = length(X), length(Y)
-Base.getindex(A::HelmholtzMatrix,i::Int,j::Int) = A(A.X[i],A.Y[j])
+# indicate that this is an ocillatory kernel with wavenumber `k`
+wavenumber(A::HelmholtzMatrix) = A.k
 
 # functor interface
 function (K::HelmholtzMatrix)(x,y)
-    k = IFGF.wavenumber(K)
+    k = wavenumber(K)
     d = norm(x-y)
-    exp(im*k*d)/d
+    exp(im*k*d)*inv(4*pi*d)
 end
 
+# abstract matrix interface
+Base.size(::HelmholtzMatrix) = length(X), length(Y)
+Base.getindex(A::HelmholtzMatrix,i::Int,j::Int) = A(A.X[i],A.Y[j])
+
 # create the abstract matrix
-A = HelmholtzMatrix(X,Y,1)
+k = 2π   
+A = HelmholtzMatrix(X,Y,k)
 ```
 
 Although the memory footprint of the object `A` is very small (it *lazily*
@@ -65,13 +70,11 @@ computes its entries), multiplying it by a vector has complexity proportional to
 computes an approximation as follows:
 
 ```julia
-L = assemble_ifgf(A,X,Y;tol=1e-3)
-mbytes = Base.summarysize(L) / 1e6
+L = assemble_ifgf(A,X,Y; tol = 1e-4)
 ```
 
-The structure `L` has a light memory footprint, occupying less than `20`
-megabytes in this example. We can use it in lieu of `A` to approximate the
-matrix vector product, as illustrated below:
+We can now use `L` in lieu of `A` to approximate the matrix vector product, as
+illustrated below:
 
 ```julia
 x     = randn(ComplexF64,n)
@@ -89,5 +92,5 @@ er    = norm(y[I]-exact) / norm(exact)
 
 The error should be smaller than the prescribed tolerance.
 
-See the [documentation](https://waveprop.github.io/IFGF.jl/dev/) for more
+See the [documentation](https://IntegralEquations.github.io/IFGF.jl/dev/) for more
 details and examples.
