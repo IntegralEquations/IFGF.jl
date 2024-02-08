@@ -72,7 +72,6 @@ _use_minimal_conedomain() = false
     return 1.5y - 0.5x * y * (y * y)
 end
 
-
 """
     struct ConeDomainSize
 

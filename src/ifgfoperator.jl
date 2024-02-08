@@ -137,7 +137,14 @@ function assemble_ifgf(
     h = isnothing(h) ? ntuple(i -> i == 1 ? (smax - smin) + eps() : π / 2 + eps(), N) : h
     cone_size = ConeDomainSize(k, h)
     if !isnothing(tol)
-        p = estimate_interpolation_order(partition, cone_size, interp_domain, kernel, tol, Tk)
+        p = estimate_interpolation_order(
+            partition,
+            cone_size,
+            interp_domain,
+            kernel,
+            tol,
+            Tk,
+        )
     end
     @debug "---Cones meshsize           = " h
     @debug "---Number of interp. points = " p
@@ -590,7 +597,7 @@ function estimate_interpolation_order(partition, ds_func, interp_domain, kernel,
             node = partition[end] |> rand
             ds   = ds_func(node)
             msh  = UniformCartesianMesh(interp_domain; step = ds)
-            acc += estimate_interpolation_error(kernel, node, msh, p, Tv)
+            acc  += estimate_interpolation_error(kernel, node, msh, p, Tv)
         end
         ers = acc ./ ntrials
         imax = argmax(ers)

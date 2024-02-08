@@ -77,14 +77,14 @@ end
 end
 
 @testset "Near and far field" begin
-    tol = 1e-4
+    tol    = 1e-4
     nx, ny = 1000, 1000
     nz     = 3
     Xpts   = rand(SVector{3,Float64}, nx)
     Ypts   = [SVector(1, 1, 1) + rand(SVector{3,Float64}) for _ in 1:ny]
     A_mat  = [K(x, y) for x in Xpts, y in Ypts]
     B      = rand(ny)
-    exact = A_mat*B
+    exact  = A_mat * B
     B_mat  = rand(ny, nz)
     C      = zeros(nx)
     A      = assemble_ifgf(K, Xpts, Ypts; tol)

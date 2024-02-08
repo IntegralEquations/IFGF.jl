@@ -3,7 +3,3 @@
 ```@autodocs
 Modules = [IFGF]
 ```
-
-```@docs
-WavePropBase.ClusterTree
-```
