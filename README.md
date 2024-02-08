@@ -50,7 +50,7 @@ Base.getindex(A::HelmholtzMatrix,i::Int,j::Int) = A(A.X[i],A.Y[j])
 
 # functor interface
 function (K::HelmholtzMatrix)(x,y)
-    k = wavenumber(K)
+    k = IFGF.wavenumber(K)
     d = norm(x-y)
     exp(im*k*d)/d
 end
