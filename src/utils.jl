@@ -84,7 +84,7 @@ Calling `f(node)` will return the meshsize for the given `node`, where `f` is a
 """
 struct ConeDomainSize{N,T}
     k::T
-    ds::SVector{N,T}
+    ds::SVector{N,Float64}
 end
 ConeDomainSize(k, ds::Tuple) = ConeDomainSize(k, SVector(ds))
 
