@@ -8,27 +8,27 @@ single/double precision), and `V` is the type of the density that will be
 interpolated.
 
 # Fields:
-- `msh`: uniform cartesian mesh of the interpolation space,
-    indexable by a `CartesianIndex`
-- `conedatadict`: dictionary mapping a cone tag `I::CartesianIndex` to an
-  `Array` storing its interpolation values/coefficient.
+- `msh`: uniform cartesian mesh of the interpolation space, indexable by a
+  `CartesianIndex`
+- `conedatadict`: dictionary mapping a cone tag `I::CartesianIndex` to the index
+  range of the interpolation points owned by that cone
 - `farlist`: nodes on the target tree that can be evaluated through
     interpolation
 - `nearlist`: nodes on the target tree that must be evaluated by a direct sum.
 """
 mutable struct SourceTreeData{N,T}
     msh::UniformCartesianMesh{N,T}
-    conedatadict::Dict{CartesianIndex{N},UnitRange{Int64}}
+    conedatadict::OrderedDict{CartesianIndex{N},UnitRange{Int64}}
     farlist::Vector{TargetTree{N,T}}
     nearlist::Vector{TargetTree{N,T}}
 end
 
 function SourceTreeData{N,T}() where {N,T}
-    domain       = HyperRectangle{N,T}(ntuple(i->0,N),ntuple(i->0,N))
-    msh          = UniformCartesianMesh(domain, ntuple(i->1,N))
-    conedict     = Dict{CartesianIndex{N},UnitRange{Int64}}()
-    farlist      = Vector{TargetTree{N,T}}()
-    nearlist     = Vector{TargetTree{N,T}}()
+    domain   = HyperRectangle{N,T}(ntuple(i -> 0, N), ntuple(i -> 0, N))
+    msh      = UniformCartesianMesh(domain, ntuple(i -> 1, N))
+    conedict = OrderedDict{CartesianIndex{N},UnitRange{Int64}}()
+    farlist  = Vector{TargetTree{N,T}}()
+    nearlist = Vector{TargetTree{N,T}}()
     return SourceTreeData{N,T}(msh, conedict, farlist, nearlist)
 end
 
@@ -36,35 +36,44 @@ end
     const SourceTree{N,T,V}
 
 Type alias for a `ClusterTree` of points (represented as `SVector{N,T}`) storing
-data of type [`SourceTreeData{N,T,V}`](@ref). See the documentation of
-[`ClusterTree`](@ref) for more details.
+data of type [`SourceTreeData{N,T,V}`](@ref).
+
+## See also: [`ClusterTree`](@ref)
 """
-const SourceTree{N,T} = ClusterTree{Vector{SVector{N,T}},HyperRectangle{N,T},SourceTreeData{N,T}}
+const SourceTree{N,T} =
+    ClusterTree{Vector{SVector{N,T}},HyperRectangle{N,T},SourceTreeData{N,T}}
 
 # getters for SourceTree
-msh(t::SourceTree)                            = t.data.msh
-conedatadict(t::SourceTree)                   = t.data.conedatadict
-active_cone_idxs(t::SourceTree)               = keys(conedatadict(t))
+msh(t::SourceTree)          = t.data.msh
+conedatadict(t::SourceTree) = t.data.conedatadict
+# FIXME: when getting the keys of the conedatadict, it is nice to have it as a vector
+active_cone_idxs(t::SourceTree)               = conedatadict(t).keys
 farlist(t::SourceTree)                        = t.data.farlist
 nearlist(t::SourceTree)                       = t.data.nearlist
-center(t::SourceTree)            = t |> container |> center
-cone_domains(t::SourceTree)                   = msh(t) |> ElementIterator # iterator of HyperRectangles
-cone_domain(t::SourceTree, I::CartesianIndex) = cone_domains(t)[I]
-conedata(t::SourceTree,I::CartesianIndex)    = conedatadict(t)[I]
+center(t::SourceTree)                         = t |> container |> center
+cone_domain(t::SourceTree, I::CartesianIndex) = t.data.msh[I]
+conedata(t::SourceTree, I::CartesianIndex)    = conedatadict(t)[I]
 
 # setters
 _addtofarlist!(s::SourceTree, t::TargetTree)  = push!(farlist(s), t)
 _addtonearlist!(s::SourceTree, t::TargetTree) = push!(nearlist(s), t)
 
 """
-    _addnewcone!(node::SourceTree,I::CartesianIndex,p)
+    _addnewcone!(node::SourceTree,I::CartesianIndex[, lock])
 
-If `node` does not contain cone `I`, add it to the `conedict`.
+If `node` does not contain cone `I`, add it to the `conedict`. Does not set the
+indices of the interpolation data owned by the cone.
+
+If `lock` is passed, the operation is thread-safe.
 """
-function _addnewcone!(node::SourceTree, idxcone, ::Val{P}) where {P}
+function _addnewcone!(node::SourceTree, idxcone, lck)
     cd = conedatadict(node)
     if !haskey(cd, idxcone)
-        push!(cd, idxcone => -1:-1)
+        if isnothing(lck)
+            push!(cd, idxcone => -1:-1)
+        else
+            @lock lck push!(cd, idxcone => -1:-1)
+        end
     end
     return node
 end
@@ -97,7 +106,7 @@ function interp2cart(si, source::SourceTree)
     bbox = container(source)
     xc   = center(bbox)
     h    = radius(bbox)
-    interp2cart(si, xc, h)
+    return interp2cart(si, xc, h)
 end
 
 function interp2cart(si, xc::SVector{N}, h::Number) where {N}
@@ -105,17 +114,17 @@ function interp2cart(si, xc::SVector{N}, h::Number) where {N}
         s, θ = si
         @assert -π ≤ θ < π
         r = h / s
-        sin_θ,cos_θ = sincos(θ)
-        x,y = r*cos(θ), r*sin(θ)
+        sin_θ, cos_θ = sincos(θ)
+        x, y = r * cos(θ), r * sin(θ)
         return SVector(x, y) + xc
     elseif N == 3
-        s, θ, ϕ     = si
-        r           = h / s
-        sin_ϕ,cos_ϕ = sincos(ϕ)
-        sin_θ,cos_θ = sincos(θ)
-        x           = r * cos_ϕ * sin_θ
-        y           = r * sin_ϕ * sin_θ
-        z           = r * cos_θ
+        s, θ, ϕ      = si
+        r            = h / s
+        sin_ϕ, cos_ϕ = sincos(ϕ)
+        sin_θ, cos_θ = sincos(θ)
+        x            = r * cos_ϕ * sin_θ
+        y            = r * sin_ϕ * sin_θ
+        z            = r * cos_θ
         return SVector(x, y, z) + xc
     else
         notimplemented()
@@ -137,7 +146,7 @@ If passed a `SourceTree`, use its `center` and radius as `c` and `h` respectivel
     bbox = container(source)
     c    = center(bbox)
     h    = radius(bbox)
-    cart2interp(x, c, h)
+    return cart2interp(x, c, h)
 end
 
 @inline function cart2interp(x, c::SVector{N}, h) where {N}
@@ -152,7 +161,7 @@ end
         x, y, z = xp
         ϕ = atan(y, x)
         a = x^2 + y^2
-        θ = atan(sqrt(a),z)
+        θ = atan(sqrt(a), z)
         r = sqrt(a + z^2)
         s = h / r
         # s = h * invsqrt(a + z^2)
@@ -163,7 +172,7 @@ end
 end
 
 """
-    initialize_source_tree(;points,datatype,splitter,Xdatatype)
+    initialize_source_tree(;points,splitter)
 
 Create the tree-structure for clustering the source `points` using the splitting
 strategy of `splitter`, returning a `SourceTree` built through the empty
@@ -172,52 +181,50 @@ constructor (i.e. `data = SourceTreeData()`).
 # Arguments
 - `points`: vector of source points.
 - `splitter`: splitting strategy.
-- `Xdatatype`: type container of target points.
-- `Vdatatype`: type of value stored at interpolation nodes
 """
-function initialize_source_tree(; Ypoints::Vector{SVector{N,T}}, splitter) where {N,T}
+function initialize_source_tree(points::Vector{SVector{N,T}}, splitter) where {N,T}
     source_tree_datatype = SourceTreeData{N,T}
-    source_tree = ClusterTree{source_tree_datatype}(Ypoints, splitter)
+    source_tree          = ClusterTree{source_tree_datatype}(points, splitter)
     return source_tree
 end
 
 """
-    compute_interpolation_domain(source::SourceTree)
+    interpolation_domain(source::SourceTree)
 
-Compute the minimal domain (as a `HyperRectangle`) in interpolation space for which
+Compute the domain (as a `HyperRectangle`) in interpolation space for which
 `source` must provide a covering through its cone interpolants.
 """
-function compute_interpolation_domain(source::SourceTree{N,Td},::Val{P}) where {N,Td,P}
-    lb = svector(i->typemax(Td),N) # lower bound
-    ub = svector(i->typemin(Td),N) # upper bound
+function interpolation_domain(source::SourceTree{N,Td}, ::Val{P}) where {N,Td,P}
+    lb = svector(i -> typemax(Td), N) # lower bound
+    ub = svector(i -> typemin(Td), N) # upper bound
     # nodes on far_list
     for far_target in farlist(source)
-        for x in elements(far_target) # target points
-            s  = cart2interp(x,source)
-            lb = min.(lb,s)
-            ub = max.(ub,s)
+        @usethreads for x in elements(far_target) # target points
+            s  = cart2interp(x, source)
+            lb = min.(lb, s)
+            ub = max.(ub, s)
         end
     end
-    refnodes = cheb2nodes(P)
+    refnodes = chebnodes(P)
     if !isroot(source)
         source_parent = parent(source)
-        for I in active_cone_idxs(source_parent)
-            rec  = cone_domain(source_parent,I)
-            lc,hc = low_corner(rec), high_corner(rec)
-            c0 = (lc+hc)/2
-            c1 = (hc-lc)/2
-            cheb  = map(x-> c0 + c1 .* x,refnodes)
-            for si in cheb
+        @usethreads for I in active_cone_idxs(source_parent)
+            rec    = cone_domain(source_parent, I)
+            lc, hc = low_corner(rec), high_corner(rec)
+            c0     = (lc + hc) / 2
+            c1     = (hc - lc) / 2
+            for ŝ in refnodes
+                si = c0 + c1 .* ŝ
                 # interpolation node in physical space
-                xi = interp2cart(si,source_parent)
-                s  = cart2interp(xi,source)
-                lb = min.(lb,s)
-                ub = max.(ub,s)
+                xi = interp2cart(si, source_parent)
+                s  = cart2interp(xi, source)
+                lb = min.(lb, s)
+                ub = max.(ub, s)
             end
         end
     end
     # create the interpolation domain
-    domain = HyperRectangle(lb,ub)
+    domain = HyperRectangle(lb, ub)
     return domain
 end
 
@@ -225,14 +232,14 @@ end
     cone_index(x::SVector,tree::SourceTree)
 
 Given a point `x` in cartesian coordinates, return the index `I` of the cone in
-`source` to whcih `x` belongs, as well as its parametric coordinate `s`.
+`source` to which `x` belongs, as well as its parametric coordinate `s`.
 
 ## See also: [`cart2interp`](@ref)
 """
 function cone_index(x::SVector, tree::SourceTree)
     m = msh(tree)  # UniformCartesianMesh
     s = cart2interp(x, tree)
-    I = element_index(s,m)
+    I = element_index(s, m)
     return I, s
 end
 
@@ -242,9 +249,8 @@ end
 Given a point `s ∈ m`, return the index `I` of the element in `m` containing
 `s`.
 """
-function element_index(s::SVector{N},m::UniformCartesianMesh{N}) where {N}
-    els = ElementIterator(m)
-    sz = size(els)
+function element_index(s::SVector{N}, m::UniformCartesianMesh{N}) where {N}
+    sz = size(m)
     Δs = step(m)
     lc = low_corner(m)
     uc = high_corner(m)
@@ -253,7 +259,7 @@ function element_index(s::SVector{N},m::UniformCartesianMesh{N}) where {N}
     I = ntuple(N) do n
         q = (s[n] - lc[n]) / Δs[n]
         i = ceil(Int, q)
-        clamp(i, 1, sz[n])
+        return clamp(i, 1, sz[n])
     end
     return CartesianIndex(I)
 end

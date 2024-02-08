@@ -15,9 +15,9 @@
 # (d) statically compute the reference tensor-product chebnodes given the order
 
 """
-    cheb2nodes(n,[domain])
-    cheb2nodes(p::NTuple,[domain])
-    cheb2nodes(::Val{P},[domain])
+    chebnodes(n,[domain])
+    chebnodes(p::NTuple,[domain])
+    chebnodes(::Val{P},[domain])
 
 Return the `n` Chebyshev nodes of the second kind on the interval `[-1,1]`.
 
@@ -33,78 +33,149 @@ it.
 lb = (0.,0.)
 ub = (3.,2.)
 domain = HyperRectangle(lb,ub)
-cheb2nodes((10,5),domain) # generate `10×5` Chebyshev nodes on the `[0,3]×[0,2]` rectangle.
+chebnodes((10,5),domain) # generate `10×5` Chebyshev nodes on the `[0,3]×[0,2]` rectangle.
 ```
 """
-function cheb2nodes(n)
-    [cos((i-1)*π /(n-1)) for i in 1:n]
+function chebnodes(n)
+    return [cos((i - 1) * π / (n - 1)) for i in 1:n]
 end
 
-function cheb2nodes(p::NTuple)
-    nodes1d = map(i->cheb2nodes(i),p)
-    iter    = Iterators.product(nodes1d...)
+function chebnodes(p::NTuple)
+    nodes1d = map(i -> chebnodes(i), p)
+    iter = Iterators.product(nodes1d...)
     return iter
 end
 
-@generated function cheb2nodes(::Val{P}) where {P}
-    nodes1d = map(i->cheb2nodes(i),P)
-    iter    = Iterators.product(nodes1d...)
-    nodes   = SVector.(collect(iter))
+@generated function chebnodes(::Val{P}) where {P}
+    nodes1d = map(i -> chebnodes(i), P)
+    iter = Iterators.product(nodes1d...)
+    nodes = SVector.(collect(iter))
     if prod(P) < 1e3
-        nodes  = SArray{Tuple{P...}}(nodes)
+        nodes = SArray{Tuple{P...}}(nodes)
     end
     return :($nodes)
 end
 
-function cheb2nodes(p::Val{P},rec::HyperRectangle) where {P}
-    refnodes = cheb2nodes(p)
-    lc,hc    = low_corner(rec), high_corner(rec)
-    c0       = (lc+hc)/2
-    c1       = (hc-lc)/2
-    map(x-> c0 + c1.*x,refnodes)
+function chebnodes(p::Val{P}, rec::HyperRectangle) where {P}
+    refnodes = chebnodes(p)
+    lc, hc = low_corner(rec), high_corner(rec)
+    c0 = (lc + hc) / 2
+    c1 = (hc - lc) / 2
+    return map(x -> c0 + c1 .* x, refnodes)
 end
 
-function cheb2nodes(p::NTuple,rec::HyperRectangle)
-    refnodes = cheb2nodes(p)
-    lc,hc    = low_corner(rec), high_corner(rec)
-    c0       = (lc+hc)/2
-    c1       = (hc-lc)/2
-    map(x-> c0 + c1.*x,refnodes)
+function chebnodes(p::NTuple, rec::HyperRectangle)
+    refnodes = chebnodes(p)
+    lc, hc = low_corner(rec), high_corner(rec)
+    c0 = (lc + hc) / 2
+    c1 = (hc - lc) / 2
+    return map(x -> c0 + c1 .* x, refnodes)
 end
 
-function chebcoefs!(vals::AbstractArray)
-    plan = FFTW.plan_r2r!(copy(vals),FFTW.REDFT00)
-    chebcoefs!(vals,plan)
+"""
+    chebtransform_fftw!(vals::AbstractArray[, plan])
+
+Given a function values on the `chebnodes(p)`, where `p=size(vals)`, compute
+the Chebyshev coefficients in-place. The underlying implementation uses the
+`FFTW` library. A pre-computed `plan::FFTW.FFTWPlan` should be passed for
+efficiency.
+"""
+function chebtransform_fftw!(vals::AbstractArray)
+    plan = FFTW.plan_r2r!(copy(vals), FFTW.REDFT00)
+    return chebtransform_fftw!(vals, plan)
 end
 
-function chebcoefs!(vals::AbstractArray{<:Number,N},plan::FFTW.FFTWPlan) where {N}
-    FFTW.mul!(vals,plan,vals) # type-I DCT
+function chebtransform_fftw!(vals::AbstractArray{<:Number,N}, plan::FFTW.FFTWPlan) where {N}
+    FFTW.mul!(vals, plan, vals) # type-I DCT
     # renormalize the result to obtain the conventional
     # Chebyshev-polnomial coefficients
     s = size(vals)
-    # coefs ./= prod(n -> 2(n-1), s)
-    scale = 2^N/prod(n -> 2(n-1), s)
+    scale = 2^N / prod(n -> 2(n - 1), s)
     @. vals *= scale
-    for dim = 1:N
-        I = CartesianIndices(ntuple(i -> i == dim ? (1:1) : (1:s[i]),N))
+    for dim in 1:N
+        I = CartesianIndices(ntuple(i -> i == dim ? (1:1) : (1:s[i]), N))
         @views @. vals[I] /= 2
-        I = CartesianIndices(ntuple(i -> i == dim ? (s[i]:s[i]) : 1:s[i],N))
+        I = CartesianIndices(ntuple(i -> i == dim ? (s[i]:s[i]) : 1:s[i], N))
         @views @. vals[I] /= 2
     end
     return vals
 end
 
-function chebcoefs!(vals::AbstractArray{<:SVector{K}},plan) where {K}
-    coefs = ntuple(i -> chebcoefs!([v[i] for v in vals],plan), Val{K}())
-    copyto!(vals,SVector{K}.(coefs...))
+function chebtransform_fftw!(vals::AbstractArray{<:SVector{K}}, plan) where {K}
+    coefs = ntuple(i -> chebtransform_fftw!([v[i] for v in vals], plan), Val{K}())
+    return copyto!(vals, SVector{K}.(coefs...))
 end
 
-@fastmath function chebeval(coefs,x::SVector{N,<:Real},rec::HyperRectangle,sz::Val{SZ}) where {N,SZ}
+"""
+    chebtransform_native!(vals)
+
+Compute the Chebyshev coefficients given the values of a function on the
+Chebyshev nodes of the second kind (i.e. the extrema of the Chebyshev
+polynomials `Tₙ`). The  result is written in-place.
+"""
+function chebtransform_native!(vals, buff = copy(vals))
+    D = ndims(vals)
+    if D === 1
+        # base case
+        chebtransform1d!(vals, buff)
+    else
+        # recurse on N-1 dimensional slices
+        inds_after = ntuple(Returns(:), D - 1)
+        for i in 1:size(vals, 1)
+            v = view(vals, i, inds_after...)
+            b = view(buff, i, inds_after...)
+            chebtransform_native!(v, b)
+        end
+        copy!(buff, vals)
+        # finally do the first (contiguous) dimension
+        vals1d = reshape(vals, size(vals, 1), :)
+        buff1d = reshape(buff, size(vals, 1), :)
+        for (v, b) in zip(eachcol(vals1d), eachcol(buff1d))
+            chebtransform_native!(v, b)
+        end
+    end
+    return vals
+end
+
+function chebtransform1d!(coefs, vals)
+    N = length(vals)
+    # DCT-I transform
+    @inbounds for m in 0:N-1
+        coefs[m+1] = 1 / 2 * (vals[1] + (-1)^m * vals[N])
+        for n in 1:N-2
+            coefs[m+1] += vals[n+1] * cos(π * m * n / (N - 1))
+        end
+        coefs[m+1] *= 2 / (N - 1)
+    end
+    # rescale coefs
+    coefs[1] /= 2
+    coefs[end] /= 2
+    return coefs
+end
+chebtransform1d!(vals) = chebtransform1d!(vals, copy(vals))
+
+"""
+    chebeval_novec(coefs,x,rec[,sz])
+
+Implementation of [`chebeval`](@ref) using a Clenshaw summation without vectorization.
+"""
+function chebeval_novec(
+    coefs,
+    x::SVector{N,<:Real},
+    rec::HyperRectangle,
+    sz::Val{SZ},
+) where {N,SZ}
     x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
-    return evaluate(x0, coefs, Val{N}(), 1, length(coefs),sz)
+    return _evaluate(x0, coefs, Val{N}(), 1, length(coefs), sz)
 end
 
-@fastmath function evaluate(x::SVector{N}, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {N,dim,SZ}
+#=
+Adapted from `FastChebInterp` to focus on speed for small orders `p`. The coefs
+in the IFGF algorithm is typically a view of some larger array which is reused
+at different levels of the algorithn. We then pass the size of the coefficients
+statically which allows for various improvements by the compiler (like loop unrolling).
+=#
+@inline @fastmath function _evaluate(x, c, ::Val{dim}, i1, len, sz::Val{SZ}) where {dim,SZ}
     @inbounds n = SZ[dim]
     @inbounds xd = x[dim]
     if dim == 1
@@ -115,7 +186,7 @@ end
         end
         @inbounds bₖ = muladd(2xd, c[i1+(n-1)], c[i1+(n-2)])
         @inbounds bₖ₊₁ = oftype(bₖ, c[i1+(n-1)])
-        for j = n-3:-1:1
+        for j in n-3:-1:1
             @inbounds bⱼ = muladd(2xd, bₖ, c[i1+j]) - bₖ₊₁
             bₖ, bₖ₊₁ = bⱼ, bₖ
         end
@@ -125,23 +196,134 @@ end
 
         # we recurse downward on dim for cache locality,
         # since earlier dimensions are contiguous
-        dim′ = Val{dim-1}()
+        dim′ = Val{dim - 1}()
 
-        c₁ = evaluate(x, c, dim′, i1, Δi,sz)
+        c₁ = _evaluate(x, c, dim′, i1, Δi, sz)
         if n ≤ 2
             n == 1 && return c₁ + one(xd) * zero(c₁)
-            c₂ = evaluate(x, c, dim′, i1+Δi, Δi, sz)
-            return c₁ + xd*c₂
+            c₂ = _evaluate(x, c, dim′, i1 + Δi, Δi, sz)
+            return c₁ + xd * c₂
         end
-        cₙ₋₁ = evaluate(x, c, dim′, i1+(n-2)*Δi, Δi,sz)
-        cₙ = evaluate(x, c, dim′, i1+(n-1)*Δi, Δi,sz)
+        cₙ₋₁ = _evaluate(x, c, dim′, i1 + (n - 2) * Δi, Δi, sz)
+        cₙ = _evaluate(x, c, dim′, i1 + (n - 1) * Δi, Δi, sz)
         bₖ = muladd(2xd, cₙ, cₙ₋₁)
         bₖ₊₁ = oftype(bₖ, cₙ)
-        for j = n-3:-1:1
-            cⱼ = evaluate(x, c, dim′, i1+j*Δi, Δi,sz)
+        for j in n-3:-1:1
+            cⱼ = _evaluate(x, c, dim′, i1 + j * Δi, Δi, sz)
             bⱼ = muladd(2xd, bₖ, cⱼ) - bₖ₊₁
             bₖ, bₖ₊₁ = bⱼ, bₖ
         end
         return muladd(xd, bₖ, c₁) - bₖ₊₁
     end
+end
+
+@inline @fastmath function _evaluate_vec(
+    x,
+    c,
+    ::Val{dim},
+    i1,
+    len,
+    sz::Val{SZ},
+) where {dim,SZ}
+    @inbounds n = SZ[dim]
+    @inbounds xd = x[dim]
+    if dim == 1
+        @inbounds c₁ = c[i1]
+        if n ≤ 2
+            n == 1 && return c₁ + one(xd) * zero(c₁)
+            return muladd(xd, c[i1+1], c₁)
+        end
+        @inbounds bₖ = muladd(2xd, c[i1+(n-1)], c[i1+(n-2)])
+        @inbounds bₖ₊₁ = oftype(bₖ, c[i1+(n-1)])
+        for j in n-3:-1:1
+            @inbounds bⱼ = muladd(2xd, bₖ, c[i1+j]) - bₖ₊₁
+            bₖ, bₖ₊₁ = bⱼ, bₖ
+        end
+        return muladd(xd, bₖ, c₁) - bₖ₊₁
+    else
+        Δi = len ÷ n # column-major stride of current dimension
+
+        # we recurse downward on dim for cache locality,
+        # since earlier dimensions are contiguous
+        dim′ = Val{dim - 1}()
+
+        c₁ = _evaluate(x, c, dim′, i1, Δi, sz)
+        if n ≤ 2
+            n == 1 && return c₁ + one(xd) * zero(c₁)
+            c₂ = _evaluate(x, c, dim′, i1 + Δi, Δi, sz)
+            return c₁ + xd * c₂
+        end
+        cₙ₋₁ = _evaluate(x, c, dim′, i1 + (n - 2) * Δi, Δi, sz)
+        cₙ = _evaluate(x, c, dim′, i1 + (n - 1) * Δi, Δi, sz)
+        bₖ = muladd(2xd, cₙ, cₙ₋₁)
+        bₖ₊₁ = oftype(bₖ, cₙ)
+        for j in n-3:-1:1
+            cⱼ = _evaluate(x, c, dim′, i1 + j * Δi, Δi, sz)
+            bⱼ = muladd(2xd, bₖ, cⱼ) - bₖ₊₁
+            bₖ, bₖ₊₁ = bⱼ, bₖ
+        end
+        return muladd(xd, bₖ, c₁) - bₖ₊₁
+    end
+end
+
+"""
+    chebeval_vec(coefs,x,rec[,sz])
+
+Implementation of [`chebeval`](@ref) using a Clenshaw summation wiht vectorization.
+"""
+@fastmath @inline function chebeval_vec(
+    coefs,
+    x::SVector{N,<:Real},
+    rec::HyperRectangle,
+    sz::Val{SZ},
+) where {N,SZ}
+    N == 1 && (return chebeval_novec(coefs, x, rec, sz))
+    x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
+    return _evaluate_vec(x0, coefs, sz)
+end
+
+@fastmath @inline function _evaluate_vec(x, coeffs, ::Val{SZ}) where {SZ}
+    N = length(x)
+    T = eltype(coeffs)
+    V = SVector{SZ[1],T}
+    n = prod(SZ) ÷ SZ[1]
+    coeffs_ = reinterpret(V, coeffs)
+    # coeffs_ = unsafe_wrap(Array, reinterpret(Ptr{V}, pointer(coeffs)), n)
+    f1d = _evaluate(deleteat(x, 1), coeffs_, Val{N - 1}(), 1, n, Val{SZ[2:end]}())
+    return _evaluate(x[1], f1d, Val{1}(), 1, SZ[1], Val(SZ[1:1]))
+end
+
+function chebeval_vecmat(coefs, x::SVector{N,<:Real}, rec, sz) where {N}
+    N == 1 && (return chebeval_novec(coefs, x, rec, sz))
+    x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
+    return _evaluate_vecmat(x0, coefs, sz)
+end
+
+function _evaluate_vecmat(x, coeffs, ::Val{SZ}) where {SZ}
+    N = length(SZ)
+    T = eltype(coeffs)
+    SZ′ = SZ[1:end-1]
+    V = SVector{prod(SZ′),T}
+    coeffs_ = reinterpret(V, coeffs)
+    # coeffs_ = unsafe_wrap(Array, reinterpret(Ptr{V}, pointer(coeffs)), SZ[end])
+    c̃ = _evaluate(x[end], coeffs_, Val{1}(), 1, SZ[N], Val(SZ[N:N]))
+    return _evaluate(deleteat(x, N), c̃, Val{N - 1}(), 1, prod(SZ′), Val(SZ[1:N-1]))
+end
+
+"""
+    cheb_error_estimate(coefs::AbstractArray{T,N},dim)
+
+Given an `N` dimensional array of coefficients , estimate the relative error
+commited by the Chebyshev interpolant along dimension `dim`.
+"""
+function cheb_error_estimate(coefs::AbstractArray{T,N}, dim) where {T,N}
+    sz = size(coefs)
+    I = ntuple(N) do d
+        if d == dim
+            sz[d]:sz[d]
+        else
+            1:sz[d]
+        end
+    end
+    return norm(view(coefs, I...), 2) / norm(coefs, 2)
 end

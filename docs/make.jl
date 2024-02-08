@@ -1,25 +1,38 @@
-using IFGF
 using Documenter
+using IFGF
 
-DocMeta.setdocmeta!(IFGF, :DocTestSetup, :(using IFGF); recursive=true)
+draft = false
+
+const ON_CI = get(ENV, "CI", "false") == "true"
+
+ON_CI && (draft = false) # always full build on CI
+
+println("\n*** Generating documentation")
+
+DocMeta.setdocmeta!(IFGF, :DocTestSetup, :(using IFGF); recursive = true)
+
+modules = [IFGF]
 
 makedocs(;
-    modules=[IFGF,WavePropBase],
-    authors="Luiz M. Faria <maltezfaria@gmail.com> and contributors",
-    repo="https://github.com/WaveProp/IFGF.jl/blob/{commit}{path}#{line}",
-    sitename="IFGF.jl",
-    format=Documenter.HTML(;
-        prettyurls=get(ENV, "CI", "false") == "true",
-        canonical="https://WaveProp.github.io/IFGF.jl",
-        assets=String[],
+    modules = modules,
+    repo = "",
+    sitename = "IFGF.jl",
+    format = Documenter.HTML(;
+        prettyurls = ON_CI,
+        canonical = "https://github.com/IntegralEquations/IFGF.jl",
+        assets = String[],
     ),
-    pages=[
+    pages = [
         "Home" => "index.md",
         "References" => "references.md",
     ],
+    warnonly = ON_CI ? false : Documenter.except(:linkcheck_remotes),
+    pagesonly = true,
+    draft,
 )
 
 deploydocs(;
-    repo="github.com/WaveProp/IFGF.jl",
-    devbranch="main"
+    repo = "https://github.com/IntegralEquations/IFGF.jl",
+    devbranch = "main",
+    push_preview = true,
 )
