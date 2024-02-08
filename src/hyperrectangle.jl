@@ -22,8 +22,8 @@ It is recommended that `lc` and `hc` be of type `SVector` or `Tuple` to avoid
 type instabilities.
 
 ```jldoctest
-julia> WavePropBase.HyperRectangle((0.0, 0.0), (1.0, 2.0))
-WavePropBase.HyperRectangle{2, Float64}([0.0, 0.0], [1.0, 2.0])
+julia> IFGF.HyperRectangle((0.0, 0.0), (1.0, 2.0))
+IFGF.HyperRectangle{2, Float64}([0.0, 0.0], [1.0, 2.0])
 ```
 
 """

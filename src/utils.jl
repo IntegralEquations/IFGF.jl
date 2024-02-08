@@ -72,73 +72,58 @@ _use_minimal_conedomain() = false
     return 1.5y - 0.5x * y * (y * y)
 end
 
-"""
-    cone_domain_size_func(Δs₀::NTuple{N,T},k)
 
-Returns an anonymous function `(node) -> Δs` that computes an appropriate size
-`Δs` for the interpolation domain of `node` given an intial size `Δs₀` and a
-wavenumber `k`. The function is constructed so as to scale `Δs₀` by the inverse
-of the acoustic size of `node`.
 """
-function cone_domain_size_func(k, ds)
-    if k == 0
-        func = (node) -> ds
+    struct ConeDomainSize
+
+Use `ConeDomainSize(k,ds)` to create a function that computes the appropriate
+meshsize for a given `ClusterTree` based on the wavenumber `k` and the reference
+meshsize `ds`.
+
+Calling `f(node)` will return the meshsize for the given `node`, where `f` is a
+`ConeDomainSize` object.
+"""
+struct ConeDomainSize{N,T}
+    k::T
+    ds::SVector{N,T}
+end
+ConeDomainSize(k, ds::Tuple) = ConeDomainSize(k, SVector(ds))
+
+function (f::ConeDomainSize)(node)
+    if iszero(f.k)
+        return f.ds
     else
         # oscillatory case (e.g. Helmholtz, Maxwell)
         # k: wavenumber
-        func = (node) -> begin
-            bbox = IFGF.container(node)
-            w    = maximum(high_corner(bbox) - low_corner(bbox))
-            δ    = max(k * w / 2, 1)
-            ds ./ δ
-        end
+        bbox = container(node)
+        w    = maximum(high_corner(bbox) - low_corner(bbox))
+        δ    = max(f.k * w / 2, 1)
+        return f.ds / δ
     end
-    return func
-end
-
-function cone_domain_size_func(k, ds::Number)
-    if k == 0
-        func = (node) -> begin
-            N = ambient_dimension(node)
-            ntuple(i -> ds, N)
-        end
-    else
-        # oscillatory case (e.g. Helmholtz, Maxwell)
-        # k: wavenumber
-        func = (node) -> begin
-            N = ambient_dimension(node)
-            ds_tup = ntuple(i -> ds, N)
-            bbox = IFGF.container(node)
-            w = maximum(high_corner(bbox) - low_corner(bbox))
-            δ = max(k * w / 2, 1)
-            ds_tup ./ δ
-        end
-    end
-    return func
 end
 
 """
-    modified_admissible_condition(target,source,[η])
+    struct AdmissibilityCondition
 
-A target and source are admissible under the *modified admissiblility condition*
-(MAC) if the target box lies farther than `r*η` away, where `r` is the radius of
-the source box and `η >= 1` is an adjustable parameter. By default, `η = N /
-√N`, where `N` is the ambient dimension.
+Functor used to determine if the interaction between a `target` and a `source`
+can be approximated using an interpolation scheme.
+
+A target and source are admissible under this *admissiblility condition* if the
+target box lies farther than `r*η` away, where `r` is the radius of the source
+box and `η >= 1` is an adjustable parameter. In dimension `N`, the default
+choice is `η = √N`.
 """
-function modified_admissibility_condition(target, source, η)
-    # compute distance between source center and target box
+struct AdmissibilityCondition
+    η::Float64
+end
+
+function (f::AdmissibilityCondition)(target, source)
     xc   = source |> container |> center
     h    = source |> container |> radius
     bbox = container(target)
     dc   = distance(xc, bbox)
     # if target box is outside a sphere of radius h*η, consider it admissible.
-    return dc > η * h
-end
-
-function modified_admissibility_condition(target, source)
-    N = ambient_dimension(target)
-    η = N / sqrt(N)
-    return modified_admissibility_condition(target, source, η)
+    return dc > f.η * h
 end
 
 """

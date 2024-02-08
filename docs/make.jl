@@ -1,7 +1,7 @@
 using Documenter
 using IFGF
 
-draft = true
+draft = false
 
 const ON_CI = get(ENV, "CI", "false") == "true"
 
@@ -10,6 +10,8 @@ ON_CI && (draft = false) # always full build on CI
 println("\n*** Generating documentation")
 
 DocMeta.setdocmeta!(IFGF, :DocTestSetup, :(using IFGF); recursive = true)
+
+modules = [IFGF]
 
 makedocs(;
     modules = modules,
@@ -21,7 +23,7 @@ makedocs(;
         assets = String[],
     ),
     pages = [
-        # "Home" => "index.md",
+        "Home" => "index.md",
         "References" => "references.md",
     ],
     warnonly = ON_CI ? false : Documenter.except(:linkcheck_remotes),

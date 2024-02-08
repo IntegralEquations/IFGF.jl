@@ -1,10 +1,8 @@
 """
     const TargetTree{N,T}
 
-Type alias for a `ClusterTree` of points (represented as `SVector{N,T}`)
-containing no additional data. See the documentation of
-`ClusterTree` in [`WavePropBase`](https://github.com/WaveProp/WavePropBase.jl)
-for more information.
+Type alias for a [`ClusterTree`](@ref) of points (represented as `SVector{N,T}`)
+containing no additional data.
 """
 const TargetTree{N,T} = ClusterTree{Vector{SVector{N,T}},HyperRectangle{N,T},Nothing}
 

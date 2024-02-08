@@ -8,7 +8,7 @@ requires the following methods:
 - `split!(clt,splitter)` : perform the splitting of the `ClusterTree` handling
   the necessary data sorting.
 
-See [`GeometricSplitter`](@ref) for an example of an implementation.
+See [`DyadicSplitter`](@ref) for an example of an implementation.
 """
 abstract type AbstractSplitter end
 
@@ -77,7 +77,7 @@ end
 """
     struct DyadicMinimalSplitter <: AbstractSplitter
 
-Similar to [`DiadicSplitter`](@ref), but the boundin boxes are shrank to the
+Similar to [`DyadicSplitter`](@ref), but the boundin boxes are shrank to the
 minimal axis-aligned boxes at the end.
 
 ## See also: [`AbstractSplitter`](@ref)

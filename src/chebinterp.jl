@@ -79,8 +79,6 @@ Given a function values on the `chebnodes(p)`, where `p=size(vals)`, compute
 the Chebyshev coefficients in-place. The underlying implementation uses the
 `FFTW` library. A pre-computed `plan::FFTW.FFTWPlan` should be passed for
 efficiency.
-
-## See also: [`chebnodes`](@ref)
 """
 function chebtransform_fftw!(vals::AbstractArray)
     plan = FFTW.plan_r2r!(copy(vals), FFTW.REDFT00)
@@ -114,8 +112,6 @@ end
 Compute the Chebyshev coefficients given the values of a function on the
 Chebyshev nodes of the second kind (i.e. the extrema of the Chebyshev
 polynomials `Tₙ`). The  result is written in-place.
-
-## See also: [`chebcoefs!`](@ref)
 """
 function chebtransform_native!(vals, buff = copy(vals))
     D = ndims(vals)
