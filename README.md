@@ -5,7 +5,7 @@
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://IntegralEquations.github.io/IFGF.jl/stable)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://IntegralEquations.github.io/IFGF.jl/dev)
 [![Build Status](https://github.com/IntegralEquations/IFGF.jl/workflows/CI/badge.svg)](https://github.com/IntegralEquations/IFGF.jl/actions)
-[![Coverage](https://codecov.io/gh/IntegralEquations/IFGF.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/IntegralEquations/IFGF.jl)
+[![codecov](https://codecov.io/gh/IntegralEquations/IFGF.jl/graph/badge.svg?token=IqlADUFvwx)](https://codecov.io/gh/IntegralEquations/IFGF.jl)
 
 ## Installation
 Install from the Pkg REPL:
