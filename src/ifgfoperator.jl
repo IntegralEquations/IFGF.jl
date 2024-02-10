@@ -236,7 +236,8 @@ dimension, and `ds_func(node)` gives the meshsize of the domain in
 interpolation-space for `node`.
 """
 @noinline function _compute_cone_list!(partition, p, ds_func, domain_)
-    refnodes = chebnodes(p)
+    T = float_type(domain_)
+    refnodes = chebnodes(p, T)
     for depth in partition
         @usethreads for source in depth
             length(source) == 0 && continue # skip empty nodes
@@ -481,17 +482,17 @@ function _chebtransform!(node::SourceTree{N,Td}, ::Val{P}, plan, buff) where {N,
 end
 
 function _particles_to_interpolants!(
-    node::SourceTree{N,Td},
+    node::SourceTree,
     K,
     B,
-    p::Val{P},
-    buff,
-) where {N,Td,P}
+    p::Val,
+    buff
+)
     Ypts = node |> root_elements
     for I in active_cone_idxs(node)
         rec = cone_domain(node, I)
         s = chebnodes(p, rec) # cheb points in parameter space
-        x = map(si -> interp2cart(si, node), s)
+        x = map(si -> interp2cart(si, node), s) |> vec
         irange = 1:length(x)
         jrange = index_range(node)
         vals = view(buff, conedata(node, I))

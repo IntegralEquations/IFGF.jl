@@ -36,6 +36,14 @@ ambient_dimension(::HyperRectangle{N}) where {N} = N
 geometric_dimension(::HyperRectangle{N}) where {N} = N
 
 """
+    float_type(rec::HyperRectangle)
+
+Floating type used the underlying structure (e.g. `Float32`, `Float64`).
+"""
+float_type(::HyperRectangle{N,T}) where {N,T} = T
+
+
+"""
     diameter(Ω)
 
 Largest distance between `x` and `y` for `x,y ∈ Ω`.

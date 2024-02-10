@@ -32,12 +32,13 @@ function will redefine `chebeval` to point to either `chebeval_vec` or
 """
 function use_vectorized_chebeval(mode = true)
     if mode
-        @eval chebeval(args...) = chebeval_vec(args...)
+        @eval _use_vectorized_chebeval() = true
     else
-        @eval chebeval(args...) = chebeval_novec(args...)
+        @eval _use_vectorized_chebeval() = false
     end
     return nothing
 end
+_use_vectorized_chebeval() = false
 
 """
     chebeval(coefs,x,rec[,sz])
@@ -46,7 +47,13 @@ Evaluate the Chebyshev polynomial defined on `rec` with coefficients given by
 `coefs` at the point `x`. If the size of `coefs` is known statically, its size
 can be passed as a `Val` using the `sz` argument.
 """
-chebeval(args...) = chebeval_novec(args...)
+@inline function chebeval(args...)
+    if _use_vectorized_chebeval()
+        return chebeval_vec(args...)
+    else
+        return chebeval_novec(args...)
+    end
+end
 
 """
     use_minimal_conedomain(mode=true)
@@ -136,7 +143,7 @@ multiplying an element of type `T` with an element of type `V` makes sense.
 function _density_type_from_kernel_type(T)
     if T <: Number
         return T
-    elseif T <: Union{SMatrix,Adjoint}
+    elseif T <: Union{SMatrix, Transpose}
         m, n = size(T)
         return SVector{n,eltype(T)}
     else
@@ -240,6 +247,7 @@ svector(f, n) = ntuple(f, n) |> SVector
 # some reasonable defaults for center
 center(x::Tuple) = SVector(x)
 center(x::SVector) = x
+center(x) = coords(x)
 
 """
     coords(x)
@@ -293,5 +301,19 @@ macro usespawn(expr::Expr)
     return esc(ex)
 end
 
+"""
+    real_and_imag(v)
+
+Return a view over the real and imaginary parts of a complex vector `v`.
+"""
+function real_and_imag(v::AbstractVector{Complex{T}}) where {T<:Real}
+    vfloat = reinterpret(T,v)
+    vr = @views vfloat[1:2:end]
+    vi = @views vfloat[2:2:end]
+    return vr, vi
+end
+
 const Point2D = SVector{2,Float64}
 const Point3D = SVector{3,Float64}
+const Point2Df = SVector{2,Float32}
+const Point3Df = SVector{3,Float32}

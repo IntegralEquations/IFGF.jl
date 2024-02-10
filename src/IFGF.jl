@@ -22,6 +22,7 @@ include("targettree.jl")
 include("sourcetree.jl")
 include("chebinterp.jl")
 include("ifgfoperator.jl")
+include("kernels.jl")
 
 export
 # methods

@@ -36,18 +36,18 @@ domain = HyperRectangle(lb,ub)
 chebnodes((10,5),domain) # generate `10×5` Chebyshev nodes on the `[0,3]×[0,2]` rectangle.
 ```
 """
-function chebnodes(n)
-    return [cos((i - 1) * π / (n - 1)) for i in 1:n]
+function chebnodes(n::Integer,::Type{T}) where {T<:Real}
+    return [T(cos((i - 1) * π / (n - 1))) for i in 1:n]
 end
 
-function chebnodes(p::NTuple)
-    nodes1d = map(i -> chebnodes(i), p)
+function chebnodes(p::NTuple,::Type{T}) where {T}
+    nodes1d = map(i -> chebnodes(i,T), p)
     iter = Iterators.product(nodes1d...)
     return iter
 end
 
-@generated function chebnodes(::Val{P}) where {P}
-    nodes1d = map(i -> chebnodes(i), P)
+@generated function chebnodes(::Val{P},::Type{T}) where {P,T}
+    nodes1d = map(i -> chebnodes(i,T), P)
     iter = Iterators.product(nodes1d...)
     nodes = SVector.(collect(iter))
     if prod(P) < 1e3
@@ -56,8 +56,8 @@ end
     return :($nodes)
 end
 
-function chebnodes(p::Val{P}, rec::HyperRectangle) where {P}
-    refnodes = chebnodes(p)
+function chebnodes(p::Val{P}, rec::HyperRectangle{N,T}) where {P,N,T}
+    refnodes = chebnodes(p,T)
     lc, hc = low_corner(rec), high_corner(rec)
     c0 = (lc + hc) / 2
     c1 = (hc - lc) / 2
@@ -65,7 +65,8 @@ function chebnodes(p::Val{P}, rec::HyperRectangle) where {P}
 end
 
 function chebnodes(p::NTuple, rec::HyperRectangle)
-    refnodes = chebnodes(p)
+    T = float_type(rec)
+    refnodes = chebnodes(p,T)
     lc, hc = low_corner(rec), high_corner(rec)
     c0 = (lc + hc) / 2
     c1 = (hc - lc) / 2
@@ -237,7 +238,6 @@ end
     N = length(x)
     T = eltype(coeffs)
     V = SVector{SZ[1],T}
-    # V = Vec{SZ[1],T}
     n = prod(SZ) ÷ SZ[1]
     coeffs_ = reinterpret(V, coeffs)
     # coeffs_ = unsafe_wrap(Array, reinterpret(Ptr{V}, pointer(coeffs)), n)
