@@ -1,11 +1,10 @@
 """
-    mutable struct SourceTreeData{N,T,V}
+    mutable struct SourceTreeData{N,T,S}
 
 Struct used to store data associated with a node of the `SourceTree`. The
 parametric type `N` represents the ambient dimension, `T` represents the
 primitive type used to represent the points (e.g. `Float32` or `Float64` for
-single/double precision), and `V` is the type of the density that will be
-interpolated.
+single/double precision), and `S` is the type of node in the near and far field.
 
 # Fields:
 - `msh`: uniform cartesian mesh of the interpolation space, indexable by a
@@ -16,32 +15,29 @@ interpolated.
     interpolation
 - `nearlist`: nodes on the target tree that must be evaluated by a direct sum.
 """
-mutable struct SourceTreeData{N,T}
+mutable struct SourceTreeData{N,T,S}
     msh::UniformCartesianMesh{N,T}
     conedatadict::OrderedDict{CartesianIndex{N},UnitRange{Int64}}
-    farlist::Vector{TargetTree{N,T}}
-    nearlist::Vector{TargetTree{N,T}}
+    farlist::Vector{S}
+    nearlist::Vector{S}
 end
 
-function SourceTreeData{N,T}() where {N,T}
+function SourceTreeData{N,T,S}() where {N,T,S}
     domain   = HyperRectangle{N,T}(ntuple(i -> 0, N), ntuple(i -> 0, N))
     msh      = UniformCartesianMesh(domain, ntuple(i -> 1, N))
     conedict = OrderedDict{CartesianIndex{N},UnitRange{Int64}}()
-    farlist  = Vector{TargetTree{N,T}}()
-    nearlist = Vector{TargetTree{N,T}}()
-    return SourceTreeData{N,T}(msh, conedict, farlist, nearlist)
+    farlist  = Vector{S}()
+    nearlist = Vector{S}()
+    return SourceTreeData{N,T,S}(msh, conedict, farlist, nearlist)
 end
 
 """
-    const SourceTree{N,T,V}
+    const SourceTree{T,S,D}
 
-Type alias for a `ClusterTree` of points (represented as `SVector{N,T}`) storing
-data of type [`SourceTreeData{N,T,V}`](@ref).
-
-## See also: [`ClusterTree`](@ref)
+Type alias for a `ClusterTree` with a data field `D` of type `SourceTreeData`.
 """
-const SourceTree{N,T} =
-    ClusterTree{Vector{SVector{N,T}},HyperRectangle{N,T},SourceTreeData{N,T}}
+const SourceTree{T,S} =
+    ClusterTree{T,S,<:SourceTreeData}
 
 # getters for SourceTree
 msh(t::SourceTree)          = t.data.msh
@@ -169,23 +165,6 @@ end
     else
         notimplemented()
     end
-end
-
-"""
-    initialize_source_tree(;points,splitter)
-
-Create the tree-structure for clustering the source `points` using the splitting
-strategy of `splitter`, returning a `SourceTree` built through the empty
-constructor (i.e. `data = SourceTreeData()`).
-
-# Arguments
-- `points`: vector of source points.
-- `splitter`: splitting strategy.
-"""
-function initialize_source_tree(points::Vector{SVector{N,T}}, splitter) where {N,T}
-    source_tree_datatype = SourceTreeData{N,T}
-    source_tree          = ClusterTree{source_tree_datatype}(points, splitter)
-    return source_tree
 end
 
 """
