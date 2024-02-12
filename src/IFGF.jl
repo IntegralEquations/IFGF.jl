@@ -9,6 +9,7 @@ using Printf
 using StaticArrays
 using Statistics: median
 using TimerOutputs
+using Bessels
 
 import AbstractTrees
 import LinearAlgebra: mul!
