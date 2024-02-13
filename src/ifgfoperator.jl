@@ -385,28 +385,32 @@ end
     coefs, next_coefs = mulbuffer.current_coefs, mulbuffer.next_coefs
     plan = mulbuffer.plan
     nt = Threads.nthreads()
-    Cthreads = [zero(C) for _ in 1:nt]
+    # Cthreads = [zero(C) for _ in 1:nt]
+    chn = Channel{typeof(C)}(nt)
+    foreach(i -> put!(chn, zero(C)), 1:nt)
     dmax = length(partition)
     for d in dmax:-1:1
         nodes = partition[d]
         fill!(next_coefs, zero(eltype(next_coefs)))
         @usethreads for node in nodes
-            id = Threads.threadid()
+            Cloc = take!(chn)
             length(node) == 0 && continue
             if isleaf(node)
-                _particles_to_particles!(Cthreads[id], K, target_tree, node, B, node)
+                _particles_to_particles!(Cloc, K, target_tree, node, B, node)
                 _particles_to_interpolants!(node, K, B, p, next_coefs)
             else
                 _interpolants_to_interpolants(node, K, p, next_coefs, coefs)
             end
             _chebtransform!(node, p, plan, next_coefs)
-            _interpolants_to_particles!(Cthreads[id], K, target_tree, node, p, next_coefs)
+            _interpolants_to_particles!(Cloc, K, target_tree, node, p, next_coefs)
+            put!(chn, Cloc)
         end
         coefs, next_coefs = next_coefs, coefs
     end
     # reduction stage
-    for i in 1:nt
-        axpy!(1, Cthreads[i], C)
+    for _ in 1:nt
+        Cloc = take!(chn)
+        axpy!(1, Cloc, C)
     end
     return C
 end
