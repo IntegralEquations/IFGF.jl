@@ -36,8 +36,7 @@ end
 
 Type alias for a `ClusterTree` with a data field `D` of type `SourceTreeData`.
 """
-const SourceTree{T,S} =
-    ClusterTree{T,S,<:SourceTreeData}
+const SourceTree{T,S} = ClusterTree{T,S,<:SourceTreeData}
 
 # getters for SourceTree
 msh(t::SourceTree)          = t.data.msh
@@ -173,7 +172,9 @@ end
 Compute the domain (as a `HyperRectangle`) in interpolation space for which
 `source` must provide a covering through its cone interpolants.
 """
-function interpolation_domain(source::SourceTree{N,Td}, ::Val{P}) where {N,Td,P}
+function interpolation_domain(source::SourceTree, ::Val{P}) where {P}
+    N = ambient_dimension(source)
+    Td = float_type(source)
     lb = svector(i -> typemax(Td), N) # lower bound
     ub = svector(i -> typemin(Td), N) # upper bound
     # nodes on far_list
@@ -184,7 +185,7 @@ function interpolation_domain(source::SourceTree{N,Td}, ::Val{P}) where {N,Td,P}
             ub = max.(ub, s)
         end
     end
-    refnodes = chebnodes(P)
+    refnodes = chebnodes(P, Td)
     if !isroot(source)
         source_parent = parent(source)
         @usethreads for I in active_cone_idxs(source_parent)

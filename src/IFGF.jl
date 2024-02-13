@@ -10,6 +10,8 @@ using StaticArrays
 using Statistics: median
 using TimerOutputs
 using Bessels
+using SIMD
+using LoopVectorization
 
 import AbstractTrees
 import LinearAlgebra: mul!
@@ -24,6 +26,7 @@ include("sourcetree.jl")
 include("chebinterp.jl")
 include("ifgfoperator.jl")
 include("kernels.jl")
+include("simd.jl")
 
 export
 # methods

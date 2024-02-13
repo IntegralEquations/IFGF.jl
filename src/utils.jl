@@ -24,38 +24,6 @@ end
 _use_fftw() = true
 
 """
-    use_vectorized_chebeval(mode=true)
-
-Use a vectorized version of the Chebyshev evaluation routine. Calling this
-function will redefine `chebeval` to point to either `chebeval_vec` or
-`chebeval_novec`, and thus may trigger code recompilation.
-"""
-function use_vectorized_chebeval(mode = true)
-    if mode
-        @eval _use_vectorized_chebeval() = true
-    else
-        @eval _use_vectorized_chebeval() = false
-    end
-    return nothing
-end
-_use_vectorized_chebeval() = false
-
-"""
-    chebeval(coefs,x,rec[,sz])
-
-Evaluate the Chebyshev polynomial defined on `rec` with coefficients given by
-`coefs` at the point `x`. If the size of `coefs` is known statically, its size
-can be passed as a `Val` using the `sz` argument.
-"""
-@inline function chebeval(args...)
-    if _use_vectorized_chebeval()
-        return chebeval_vec(args...)
-    else
-        return chebeval_novec(args...)
-    end
-end
-
-"""
     use_minimal_conedomain(mode=true)
 
 If set to `true`, the minimal domain for the cone interpolants will be used by
@@ -143,7 +111,7 @@ multiplying an element of type `T` with an element of type `V` makes sense.
 function _density_type_from_kernel_type(T)
     if T <: Number
         return T
-    elseif T <: Union{SMatrix, Transpose}
+    elseif T <: Union{SMatrix,Transpose}
         m, n = size(T)
         return SVector{n,eltype(T)}
     else
@@ -307,7 +275,7 @@ end
 Return a view over the real and imaginary parts of a complex vector `v`.
 """
 function real_and_imag(v::AbstractVector{Complex{T}}) where {T<:Real}
-    vfloat = reinterpret(T,v)
+    vfloat = reinterpret(T, v)
     vr = @views vfloat[1:2:end]
     vi = @views vfloat[2:2:end]
     return vr, vi
@@ -317,3 +285,18 @@ const Point2D = SVector{2,Float64}
 const Point3D = SVector{3,Float64}
 const Point2Df = SVector{2,Float32}
 const Point3Df = SVector{3,Float32}
+
+function simd_split(I::UnitRange, sz)
+    i1, il = first(I), last(I)
+    n = div(length(I), sz)
+    return range(i1; length = n, step = sz), (i1+n*sz):il
+end
+
+"""
+    float_type(x)
+
+Floating type used to represent the underlying structure (e.g. `Float32`,
+`Float64`).
+"""
+float_type(::Type{Complex{T}}) where {T} = T
+float_type(::Type{SVector{<:,T}}) where {T<:Real} = T

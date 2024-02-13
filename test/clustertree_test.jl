@@ -52,8 +52,8 @@ end
     end
 
     @testset "Points and normals" begin
-        points  = rand(SVector{3,Float64}, 1000)
-        els = [(;coords=points[i], normal=points[i]) for i in 1:1000]
+        points = rand(SVector{3,Float64}, 1000)
+        els = [(; coords = points[i], normal = points[i]) for i in 1:1000]
         IFGF.center(x::eltype(els)) = x.coords
         splitter = IFGF.DyadicSplitter(; nmax = 32)
         clt = IFGF.ClusterTree(els, splitter)

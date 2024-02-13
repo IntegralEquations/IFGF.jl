@@ -107,6 +107,8 @@ Type of elements sorted in `clt`.
 """
 element_type(::ClusterTree{T}) where {T} = eltype(T)
 
+float_type(t::ClusterTree) = float_type(container(t))
+
 isleaf(clt::ClusterTree) = isempty(clt.children)
 isroot(clt::ClusterTree) = clt.parent == clt
 hasdata(clt::ClusterTree) = isdefined(clt, :data)
@@ -139,7 +141,8 @@ during the tree construction.
 function ClusterTree{D}(
     elements,
     splitter = CardinalitySplitter();
-    copy_elements = true) where {D}
+    copy_elements = true,
+) where {D}
     copy_elements && (elements = deepcopy(elements))
     if splitter isa DyadicSplitter || splitter isa DyadicMaxDepthSplitter
         # make a cube for bounding box for quad/oct trees

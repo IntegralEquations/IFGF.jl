@@ -66,7 +66,15 @@ end
 function centered_factor(K::PDEKernel{Helmholtz{3,T}}, x, Y) where {T}
     yc = center(Y)
     d  = norm(x - yc)
-    return exp(im*K.pde.k*d) / d
+    return exp(im * K.pde.k * d) / d
+end
+
+function IFGF.transfer_factor(K::PDEKernel{Helmholtz{3,T}}, x, Y) where {T}
+    yc = IFGF.center(Y)
+    yp = IFGF.center(IFGF.parent(Y))
+    d  = norm(x - yc)
+    dp = norm(x - yp)
+    return exp(im * K.pde.k * (d - dp)) * dp / d
 end
 
 wavenumber(K::PDEKernel{<:Helmholtz}) = K.pde.k
@@ -79,9 +87,9 @@ function (SL::SingleLayerKernel{Helmholtz{N,T}})(
     d = norm(r)
     filter = !(d ≤ SAME_POINT_TOLERANCE)
     if N == 2
-        return filter * (hankelh1(0, SL.pde.k*d))
+        return filter * (hankelh1(0, SL.pde.k * d))
     elseif N == 3
-        return filter * (exp(im*SL.pde.k*d) / d)
+        return filter * (exp(im * SL.pde.k * d) / d)
     else
         error("Not implemented for N = $N")
     end
@@ -115,19 +123,16 @@ function (HS::HessianSingleLayerKernel{Helmholtz{N,T}})(
     if N == 2
         RRT = r * transpose(r) # r ⊗ rᵗ
         # TODO: rewrite the operation below in a more clear/efficient way
-        val = (-1 * k^2 / d^2 * hankelh1(2, k * d) * RRT +
-                                k / d * hankelh1(1, k * d) * I)
+        val = (-1 * k^2 / d^2 * hankelh1(2, k * d) * RRT + k / d * hankelh1(1, k * d) * I)
         return filter * val
     elseif N == 3
         ID = SMatrix{3,3,Complex{T},9}(1, 0, 0, 0, 1, 0, 0, 0, 1)
         RRT = r * transpose(r) # r ⊗ rᵗ
         term1 = 1 / d^2 * exp(im * k * d) * (-im * k + 1 / d) * ID
-        term2 = RRT / d * exp(im * k * d) / d^4 *
-                (3 * (d * im * k - 1) + d^2 * k^2)
+        term2 = RRT / d * exp(im * k * d) / d^4 * (3 * (d * im * k - 1) + d^2 * k^2)
         return filter * (term1 + term2)
     end
 end
-
 
 function (DL::DoubleLayerKernel{Helmholtz{N,T}})(
     target::SVector{N,T},
@@ -156,11 +161,17 @@ function (CF::CombinedFieldKernel{Helmholtz{N,T}})(
     filter = !(d ≤ SAME_POINT_TOLERANCE)
     if N == 2
         dbllayer = (1 * k / d * hankelh1(1, k * d) * r)
-        return filter * SVector{N + 1,Complex{T}}(hankelh1(0, k*d), dbllayer[1], dbllayer[2]) |> transpose
+        return filter *
+               SVector{N + 1,Complex{T}}(hankelh1(0, k * d), dbllayer[1], dbllayer[2]) |>
+               transpose
     elseif N == 3
         dbllayer = (1 / d^2 * exp(im * k * d) * (-im * k + 1 / d) * r)
-        return filter * SVector{N + 1,Complex{T}}(exp(im * k * d) / d, dbllayer[1], dbllayer[2], dbllayer[3]) |>
-               transpose
+        return filter * SVector{N + 1,Complex{T}}(
+            exp(im * k * d) / d,
+            dbllayer[1],
+            dbllayer[2],
+            dbllayer[3],
+        ) |> transpose
     else
         error("Not implemented for N = $N")
     end
@@ -272,6 +283,30 @@ function (::HessianSingleLayerKernel{Laplace{N}})(
         RRT = r * transpose(r) # r ⊗ rᵗ
         return filter * (1 / (d^3) * ((ID - 3 * RRT / d^2)))
     end
+end
+
+################################################################################
+################################# STOKES #######################################
+################################################################################
+
+struct Stokes{N} <: AbstractPDE{N} end
+Stokes(; dim = 3) = Stokes{dim}()
+
+function Base.show(io::IO, pde::Stokes)
+    return println(io, "Δu -∇p = 0, ∇⋅u = 0")
+end
+
+IFGF.wavenumber(::PDEKernel{<:Stokes}) = 0
+
+function (SL::SingleLayerKernel{<:Stokes{N}})(target, source, r = target - source) where {N}
+    d = norm(r)
+    filter = !(d ≤ SAME_POINT_TOLERANCE)
+    if N == 2
+        γ = -log(d)
+    elseif N == 3
+        γ = 1 / d
+    end
+    return filter * (γ * I + r * transpose(r) / d^N)
 end
 
 ################################################################################
@@ -389,6 +424,12 @@ function _tol_to_p(::Laplace{3}, tol)
 end
 
 function _tol_to_p(::Helmholtz{3,T}, tol) where {T}
+    tol > 1e-3 && return 4
+    tol > 1e-6 && return 8
+    return 16
+end
+
+function _tol_to_p(::Stokes{3}, tol)
     tol > 1e-3 && return 4
     tol > 1e-6 && return 8
     return 16

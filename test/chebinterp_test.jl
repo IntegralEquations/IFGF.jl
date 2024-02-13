@@ -1,32 +1,30 @@
 using Test
 using IFGF
 using StaticArrays
-using IFGF:
-    chebeval_novec,
-    chebeval_vec,
-    chebeval_vec,
-    chebtransform_fftw!,
-    chebtransform_native!,
-    HyperRectangle
+import IFGF
 
-for T in (Float64, ComplexF64)
-    for dim in 1:3
-        @testset "Cheyshev transform: T=$T, dim=$dim" begin
-            vals = rand(T, ntuple(i -> 5 + i, dim))
-            c1   = chebtransform_fftw!(vals)
-            c2   = chebtransform_native!(vals)
-            @test c1 ≈ c2
-        end
-
-        @testset "Clenshaw summation: T=$T, dim=$dim" begin
-            sz = ntuple(i -> 3 + i, dim)
-            c = rand(T, prod(sz))
-            x = @SVector rand(dim)
-            rec = HyperRectangle(ntuple(i -> -1.0, dim), ntuple(i -> 1.0, dim))
-            SZ = Val(sz)
-            v1 = chebeval_novec(c, x, rec, SZ)
-            v2 = chebeval_vec(c, x, rec, SZ)
-            @test v1 ≈ v2
+for F in (Float32, Float64)
+    for T in (F, Complex{F})
+        for dim in 1:3
+            # a polynomial of sufficiently low order which should be exactly
+            # reproduced by the cheb interpolant
+            f = (x) -> T(prod(x)^2 + sum(x)prod(x) + 1)
+            @testset "T=$T, dim=$dim" begin
+                # test the chebyshev transform
+                p    = ntuple(i -> 5 + i, dim)
+                x̂   = IFGF.chebnodes(p, F)
+                vals = f.(x̂)
+                c1   = IFGF.chebtransform_fftw!(copy(vals))
+                c2   = IFGF.chebtransform_native!(copy(vals))
+                @test eltype(c1) == eltype(c2) == T
+                @test c1 ≈ c2
+                # test the chebyshev evaluation
+                x = @SVector rand(F, dim)
+                rec =
+                    IFGF.HyperRectangle(ntuple(i -> -F(1.0), dim), ntuple(i -> F(1.0), dim))
+                SZ = Val(p)
+                @test IFGF.chebeval(c1, x, rec, SZ) ≈ f(x)
+            end
         end
     end
 end
