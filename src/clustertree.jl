@@ -107,6 +107,8 @@ Type of elements sorted in `clt`.
 """
 element_type(::ClusterTree{T}) where {T} = eltype(T)
 
+float_type(t::ClusterTree) = float_type(container(t))
+
 isleaf(clt::ClusterTree) = isempty(clt.children)
 isroot(clt::ClusterTree) = clt.parent == clt
 hasdata(clt::ClusterTree) = isdefined(clt, :data)
@@ -140,7 +142,6 @@ function ClusterTree{D}(
     elements,
     splitter = CardinalitySplitter();
     copy_elements = true,
-    threads = false,
 ) where {D}
     copy_elements && (elements = deepcopy(elements))
     if splitter isa DyadicSplitter || splitter isa DyadicMaxDepthSplitter
@@ -157,7 +158,7 @@ function ClusterTree{D}(
     parent = nothing
     #build the root, then recurse
     root = ClusterTree{D}(elements, bbox, irange, loc2glob, glob2loc, children, parent)
-    _build_cluster_tree!(root, splitter, threads)
+    _build_cluster_tree!(root, splitter)
     # inverse the loc2glob permutation
     glob2loc .= invperm(loc2glob)
     # finally, permute the elements so as to use the local indexing
@@ -166,17 +167,11 @@ function ClusterTree{D}(
 end
 ClusterTree(args...; kwargs...) = ClusterTree{Nothing}(args...; kwargs...)
 
-function _build_cluster_tree!(current_node, splitter, threads, depth = 0)
+function _build_cluster_tree!(current_node, splitter, depth = 0)
     if should_split(current_node, depth, splitter)
         split!(current_node, splitter)
-        if threads
-            Threads.@threads for child in children(current_node)
-                _build_cluster_tree!(child, splitter, threads, depth + 1)
-            end
-        else
-            for child in children(current_node)
-                _build_cluster_tree!(child, splitter, threads, depth + 1)
-            end
+        @usethreads for child in children(current_node)
+            _build_cluster_tree!(child, splitter, depth + 1)
         end
     end
     return current_node

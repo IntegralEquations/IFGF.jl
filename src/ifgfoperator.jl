@@ -30,8 +30,8 @@ function, and `X` and `Y` are the elements of the `target_tree` and
 """
 mutable struct IFGFOp{T} <: AbstractMatrix{T}
     const kernel
-    const target_tree::ClusterTree
-    const source_tree::ClusterTree
+    const target_tree::TargetTree
+    const source_tree::SourceTree
     const p::NTuple
     const h::NTuple
     const _source_tree_depth_partition
@@ -96,7 +96,7 @@ function assemble_ifgf(
     isconcretetype(Tk) || error("unable to infer a concrete type for the kernel")
     N, Td = length(U), eltype(U)
     # 2. figure out if tolerance + h + p make sense, correct if possible
-    h = isa(h, Number) ? ntuple(i -> h, N) : h
+    h = isa(h, Number) ? ntuple(i -> Float64(h), N) : h
     p = isa(p, Number) ? ntuple(i -> p, N) : p
     if isnothing(tol)
         isnothing(p) && error("you must pass either tol or p as keyword arguments")
@@ -106,10 +106,11 @@ function assemble_ifgf(
     # 3. Create an admissibility condition unless one is passed
     η = isnothing(η) ? sqrt(N) : η
     adm = AdmissibilityCondition(η)
-    ## Trees creation
-    Ytree = initialize_source_tree(source, splitter)
+    # Trees creation. Note that we must pass the type of data that will be
+    # stored in each node of the cluster tree
+    Xtree = ClusterTree{TargetTreeData}(target, splitter)
+    Ytree = ClusterTree{SourceTreeData{N,Td,typeof(Xtree)}}(source, splitter)
     partition = partition_by_depth(Ytree)
-    Xtree = initialize_target_tree(target, splitter)
     # Because we use a closed interpolation
     # rule, we need to ensure that s ∈ [smin,1], where smin
     # > 0 (and not zero, otherwise there will be an interpolation point at
@@ -134,7 +135,11 @@ function assemble_ifgf(
     # interpolaton order by looking at the last chebyshev coefficients in a few
     # of the nodes expansions.
     k = wavenumber(kernel)
-    h = isnothing(h) ? ntuple(i -> i == 1 ? (smax - smin) + eps() : π / 2 + eps(), N) : h
+    h = if isnothing(h)
+        ntuple(i -> i == 1 ? (smax - smin) + eps(Td) : π / 2 + eps(Td), N)
+    else
+        h
+    end
     cone_size = ConeDomainSize(k, h)
     if !isnothing(tol)
         p = estimate_interpolation_order(
@@ -235,7 +240,8 @@ dimension, and `ds_func(node)` gives the meshsize of the domain in
 interpolation-space for `node`.
 """
 @noinline function _compute_cone_list!(partition, p, ds_func, domain_)
-    refnodes = chebnodes(p)
+    T = float_type(domain_)
+    refnodes = chebnodes(p, T)
     for depth in partition
         @usethreads for source in depth
             length(source) == 0 && continue # skip empty nodes
@@ -336,7 +342,7 @@ function LinearAlgebra.mul!(
     K = kernel(A)
     _gemv!(y, K, rtree, partition, x, Val(A.p), A.mulbuffer)
     # permute output
-    global_index && invpermute!(y, loc2glob(rtree))
+    global_index && permute!(y, glob2loc(rtree))
     return y
 end
 
@@ -379,67 +385,61 @@ end
     coefs, next_coefs = mulbuffer.current_coefs, mulbuffer.next_coefs
     plan = mulbuffer.plan
     nt = Threads.nthreads()
-    Cthreads = [zero(C) for _ in 1:nt]
-    for depth in Iterators.reverse(partition)
+    # Cthreads = [zero(C) for _ in 1:nt]
+    chn = Channel{typeof(C)}(nt)
+    foreach(i -> put!(chn, zero(C)), 1:nt)
+    dmax = length(partition)
+    for d in dmax:-1:1
+        nodes = partition[d]
         fill!(next_coefs, zero(eltype(next_coefs)))
-        @usethreads for node in depth
-            id = Threads.threadid()
+        @usethreads for node in nodes
+            Cloc = take!(chn)
             length(node) == 0 && continue
             if isleaf(node)
-                _particles_to_particles!(Cthreads[id], K, target_tree, node, B, node)
+                _particles_to_particles!(Cloc, K, target_tree, node, B, node)
                 _particles_to_interpolants!(node, K, B, p, next_coefs)
             else
                 _interpolants_to_interpolants(node, K, p, next_coefs, coefs)
             end
             _chebtransform!(node, p, plan, next_coefs)
-            _interpolants_to_particles!(Cthreads[id], K, target_tree, node, p, next_coefs)
+            _interpolants_to_particles!(Cloc, K, target_tree, node, p, next_coefs)
+            put!(chn, Cloc)
         end
         coefs, next_coefs = next_coefs, coefs
     end
     # reduction stage
-    for i in 1:nt
-        axpy!(1, Cthreads[i], C)
+    for _ in 1:nt
+        Cloc = take!(chn)
+        axpy!(1, Cloc, C)
     end
     return C
 end
 
 function _interpolants_to_interpolants(
-    node::SourceTree{N,Td},
+    node,
     K,
     p::Val{P},
     buff,
     cbuff,
-) where {N,Td,P}
+) where {P}
+    T = float_type(node)
+    refnodes = chebnodes(p, T)
     @usethreads for I in active_cone_idxs(node)
-        rec = cone_domain(node, I)
-        s = chebnodes(p, rec) # cheb points in parameter space
-        x = map(si -> interp2cart(si, node), s) # cheb points in physical space
         vals = reshape(view(buff, conedata(node, I)), P)
-        # check if left index Il exists. If so, the data shared between Il and I
-        # will be handled by Il
-        idxs = if _share_interp_data()
-            ntuple(N) do dim
-                Il = decrement_index(I, dim)
-                return haskey(conedatadict(node), Il) ? (1:P[dim]-1) : (1:P[dim])
-                # 1:P[dim]
-            end |> CartesianIndices
-        else
-            eachindex(x)
-        end
+        rec = cone_domain(node, I)
+        lc, hc = low_corner(rec), high_corner(rec)
+        c0 = (lc + hc) / 2
+        c1 = (hc - lc) / 2
         for chd in children(node)
-            # TODO: if number of nodes is too small, just evalute directly
             length(chd) == 0 && continue
-            for i in idxs
-                idxcone, si = cone_index(x[i], chd)
+            for (i, ŝ) in enumerate(refnodes)
+                x = interp2cart(c0 + c1 .* ŝ, node) # cheb point in physical space
+                idxcone, si = cone_index(x, chd)
                 # transfer block's interpolant to parent's interpolants
-                rec = cone_domain(chd, idxcone)
-                coefs = view(cbuff, conedata(chd, idxcone))
-                vals[i] += transfer_factor(K, x[i], chd) * chebeval(coefs, si, rec, p)
+                rec_chd = cone_domain(chd, idxcone)
+                coefs   = view(cbuff, conedata(chd, idxcone))
+                vals[i] += transfer_factor(K, x, chd) * chebeval(coefs, si, rec_chd, p)
             end
-        end
-        # copy the data to the cone on the right if it exists
-        if _share_interp_data()
-            _transfer_right(I, vals, buff, conedatadict(node), p)
         end
     end
     return node
@@ -464,7 +464,7 @@ function _transfer_right(I, vals_left, buff, dict, ::Val{P}) where {P}
     end
 end
 
-function _chebtransform!(node::SourceTree{N,Td}, ::Val{P}, plan, buff) where {N,Td,P}
+function _chebtransform!(node::SourceTree, ::Val{P}, plan, buff) where {P}
     @usethreads for I in active_cone_idxs(node)
         vals = view(buff, conedata(node, I))
         # transform vals to coefs in place. Coefs will be used later when the
@@ -479,18 +479,12 @@ function _chebtransform!(node::SourceTree{N,Td}, ::Val{P}, plan, buff) where {N,
     return node
 end
 
-function _particles_to_interpolants!(
-    node::SourceTree{N,Td},
-    K,
-    B,
-    p::Val{P},
-    buff,
-) where {N,Td,P}
+function _particles_to_interpolants!(node::SourceTree, K, B, p::Val, buff)
     Ypts = node |> root_elements
     for I in active_cone_idxs(node)
         rec = cone_domain(node, I)
         s = chebnodes(p, rec) # cheb points in parameter space
-        x = map(si -> interp2cart(si, node), s)
+        x = map(si -> interp2cart(si, node), s) |> vec
         irange = 1:length(x)
         jrange = index_range(node)
         vals = view(buff, conedata(node, I))
@@ -507,10 +501,10 @@ function _interpolants_to_particles!(
     C,
     K,
     target_tree,
-    node::SourceTree{N,T},
+    node::SourceTree,
     p::Val{P},
     buff,
-) where {N,T,P}
+) where {P}
     Xpts = target_tree |> root_elements
     @usethreads for far_target in farlist(node)
         @usethreads for i in index_range(far_target)
@@ -545,6 +539,7 @@ override this method for the type of your own custom kernel `K` if you have a
 fast way of computing the full product in-place (e.g. using SIMD instructions).
 """
 function near_interaction!(C, K, X, Y, σ, I, J)
+    @warn "using the generic fallback for near_interaction" maxlog = 1
     for i in I
         for j in J
             C[i] += K(X[i], Y[j]) * σ[j]
@@ -557,9 +552,9 @@ end
 """
     centered_factor(K,x,Y::SourceTree)
 
-Return a representative value of `K(x,y)` for `y ∈ Y`. This is used to help the
-interpolation of `I(x) = ∑ᵢ K(x,yᵢ)` where `yᵢ ∈ Y` and points `x` in the far
-field of `Y`. Defaults to `K(x,yc)` where `yc` is the center of `Y`.
+Return a representative scalar value of `K(x,y)` for `y ∈ Y`. This is used to
+help the interpolation of `I(x) = ∑ᵢ K(x,yᵢ)` where `yᵢ ∈ Y` and points `x` in
+the far field of `Y`. Defaults to `K(x,yc)` where `yc` is the center of `Y`.
 """
 function centered_factor(K, x, Y)
     yc = center(Y)
@@ -587,7 +582,6 @@ function transfer_factor(K, x, Y)
 end
 
 function estimate_interpolation_order(partition, ds_func, interp_domain, kernel, tol, Tk)
-    Tv = _density_type_from_kernel_type(Tk)
     N = ambient_dimension(interp_domain)
     p = tol ≥ 1e-4 ? ntuple(i -> 3, N) : tol ≥ 1e-8 ? ntuple(i -> 6, N) : ntuple(i -> 9, N)
     ntrials = 10
@@ -597,7 +591,7 @@ function estimate_interpolation_order(partition, ds_func, interp_domain, kernel,
             node = partition[end] |> rand
             ds   = ds_func(node)
             msh  = UniformCartesianMesh(interp_domain; step = ds)
-            acc  += estimate_interpolation_error(kernel, node, msh, p, Tv)
+            acc  += estimate_interpolation_error(kernel, node, msh, p, Tk)
         end
         ers = acc ./ ntrials
         imax = argmax(ers)
@@ -616,7 +610,8 @@ function estimate_interpolation_order(partition, ds_func, interp_domain, kernel,
     return p
 end
 
-function estimate_interpolation_error(kernel, node::SourceTree{N,T}, msh, p, Tv) where {N,T}
+function estimate_interpolation_error(kernel, node::SourceTree, msh, p, Tk)
+    N = ambient_dimension(msh)
     ncones = 10
     acc = svector(i -> 0.0, N)
     for _ in 1:ncones
@@ -626,9 +621,9 @@ function estimate_interpolation_error(kernel, node::SourceTree{N,T}, msh, p, Tv)
         s = chebnodes(p, rec) # cheb points in parameter space
         x = map(si -> interp2cart(si, node), s)
         irange = 1:length(x)
-        vals = zeros(Tv, p...)
+        vals = zeros(Tk, p...)
         Ypts = root_elements(node)[node.index_range]
-        B = 2 * rand(Tv, length(Ypts)) .- 1
+        B = randn(length(Ypts))
         jrange = 1:length(B)
         near_interaction!(vals, kernel, x, Ypts, B, irange, jrange)
         for i in eachindex(x)

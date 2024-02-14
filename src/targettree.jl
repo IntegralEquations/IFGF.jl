@@ -1,18 +1,15 @@
 """
-    const TargetTree{N,T}
+    struct TargetTreeData
 
-Type alias for a [`ClusterTree`](@ref) of points (represented as `SVector{N,T}`)
-containing no additional data.
+Struct used to store data associated with a node of the `TargetTree`. Currently
+there is nothing there, but maybe one day there will be a downward pass in the
+target tree, and it will need some fields to store data.
 """
-const TargetTree{N,T} = ClusterTree{Vector{SVector{N,T}},HyperRectangle{N,T},Nothing}
+struct TargetTreeData end
 
 """
-    initialize_target_tree(;points,splitter)
+    const TargetTree{T,S,D}
 
-Create the tree-structure for clustering the target `points` using the splitting
-strategy of `splitter`. Returns a [`TargetTree`](@ref)
+Type alias for a `ClusterTree` with a data field `D` of type `TargetTreeData`.
 """
-function initialize_target_tree(points, splitter)
-    target_tree = ClusterTree(points, splitter)
-    return target_tree
-end
+const TargetTree{T,S} = ClusterTree{T,S,<:TargetTreeData}

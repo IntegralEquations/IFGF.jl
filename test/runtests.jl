@@ -11,3 +11,7 @@ end
 @safetestset "IFGF operator" begin
     include("ifgfoperator_test.jl")
 end
+
+@safetestset "Kernels" begin
+    include("kernels_test.jl")
+end

@@ -36,18 +36,18 @@ domain = HyperRectangle(lb,ub)
 chebnodes((10,5),domain) # generate `10×5` Chebyshev nodes on the `[0,3]×[0,2]` rectangle.
 ```
 """
-function chebnodes(n)
-    return [cos((i - 1) * π / (n - 1)) for i in 1:n]
+function chebnodes(n::Integer, ::Type{T}) where {T<:Real}
+    return [T(cos((i - 1) * π / (n - 1))) for i in 1:n]
 end
 
-function chebnodes(p::NTuple)
-    nodes1d = map(i -> chebnodes(i), p)
+function chebnodes(p::NTuple, ::Type{T}) where {T}
+    nodes1d = map(i -> chebnodes(i, T), p)
     iter = Iterators.product(nodes1d...)
     return iter
 end
 
-@generated function chebnodes(::Val{P}) where {P}
-    nodes1d = map(i -> chebnodes(i), P)
+@generated function chebnodes(::Val{P}, ::Type{T}) where {P,T}
+    nodes1d = map(i -> chebnodes(i, T), P)
     iter = Iterators.product(nodes1d...)
     nodes = SVector.(collect(iter))
     if prod(P) < 1e3
@@ -56,8 +56,8 @@ end
     return :($nodes)
 end
 
-function chebnodes(p::Val{P}, rec::HyperRectangle) where {P}
-    refnodes = chebnodes(p)
+function chebnodes(p::Val{P}, rec::HyperRectangle{N,T}) where {P,N,T}
+    refnodes = chebnodes(p, T)
     lc, hc = low_corner(rec), high_corner(rec)
     c0 = (lc + hc) / 2
     c1 = (hc - lc) / 2
@@ -65,7 +65,8 @@ function chebnodes(p::Val{P}, rec::HyperRectangle) where {P}
 end
 
 function chebnodes(p::NTuple, rec::HyperRectangle)
-    refnodes = chebnodes(p)
+    T = float_type(rec)
+    refnodes = chebnodes(p, T)
     lc, hc = low_corner(rec), high_corner(rec)
     c0 = (lc + hc) / 2
     c1 = (hc - lc) / 2
@@ -155,18 +156,45 @@ end
 chebtransform1d!(vals) = chebtransform1d!(vals, copy(vals))
 
 """
-    chebeval_novec(coefs,x,rec[,sz])
+    chebeval(coefs,x,rec[,sz])
 
-Implementation of [`chebeval`](@ref) using a Clenshaw summation without vectorization.
+Evaluate the Chebyshev polynomial defined on `rec` with coefficients given by
+`coefs` at the point `x`. If the size of `coefs` is known statically, its size
+can be passed as a `Val` using the `sz` argument.
 """
-function chebeval_novec(
-    coefs,
+@inline function chebeval(
+    coefs::AbstractArray{T},
     x::SVector{N},
     rec::HyperRectangle,
     sz::Val{SZ},
-) where {N,SZ}
+) where {N,T,SZ}
+    # translate to [-1,1]ᴺ
     x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
-    return _evaluate(x0, coefs, Val{N}(), 1, length(coefs), sz)
+    # certain sizes get vectorized, while other (currently) don't
+    if (SZ[1] ∈ (4, 8, 16, 32)) && (T == Float32 || T == Float64)
+        x1, xr... = x0
+        V = Vec{SZ[1],T}
+        n = prod(SZ) ÷ SZ[1]
+        coefs_ = reinterpret(V, coefs)
+        f1d = _evaluate(xr, coefs_, Val{N - 1}(), 1, n, Val{SZ[2:end]}())
+        return _evaluate(x1, f1d, Val{1}(), 1, SZ[1], Val(SZ[1:1]))
+    elseif (SZ[1] ∈ (4, 8, 16, 32)) && (T == ComplexF32 || T == ComplexF64)
+        x1, xr... = x0
+        F = float_type(T)
+        V = Vec{2 * SZ[1],F}
+        n = prod(SZ) ÷ SZ[1]
+        coefs_ = reinterpret(V, coefs)
+        f1d = _evaluate(xr, coefs_, Val{N - 1}(), 1, n, Val{SZ[2:end]}())
+        mask_real = ntuple(i -> 2(i - 1), Val{SZ[1]}()) |> Val
+        mask_imag = ntuple(i -> 2(i - 1) + 1, Val{SZ[1]}()) |> Val
+        f1d_real = shufflevector(f1d, mask_real)
+        f1d_imag = shufflevector(f1d, mask_imag)
+        vr = _evaluate(x1, f1d_real, Val{1}(), 1, SZ[1], Val(SZ[1:1]))
+        vi = _evaluate(x1, f1d_imag, Val{1}(), 1, SZ[1], Val(SZ[1:1]))
+        return Complex(vr, vi)
+    else
+        return _evaluate(x0, coefs, Val{N}(), 1, length(coefs), sz)
+    end
 end
 
 #=
@@ -215,51 +243,6 @@ statically which allows for various improvements by the compiler (like loop unro
         end
         return muladd(xd, bₖ, c₁) - bₖ₊₁
     end
-end
-
-"""
-    chebeval_vec(coefs,x,rec[,sz])
-
-Implementation of [`chebeval`](@ref) using a Clenshaw summation wiht vectorization.
-"""
-@fastmath @inline function chebeval_vec(
-    coefs,
-    x::SVector{N,<:Real},
-    rec::HyperRectangle,
-    sz::Val{SZ},
-) where {N,SZ}
-    N == 1 && (return chebeval_novec(coefs, x, rec, sz))
-    x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
-    return _evaluate_vec(x0, coefs, sz)
-end
-
-@fastmath @inline function _evaluate_vec(x, coeffs, ::Val{SZ}) where {SZ}
-    N = length(x)
-    T = eltype(coeffs)
-    V = SVector{SZ[1],T}
-    # V = Vec{SZ[1],T}
-    n = prod(SZ) ÷ SZ[1]
-    coeffs_ = reinterpret(V, coeffs)
-    # coeffs_ = unsafe_wrap(Array, reinterpret(Ptr{V}, pointer(coeffs)), n)
-    f1d = _evaluate(deleteat(x, 1), coeffs_, Val{N - 1}(), 1, n, Val{SZ[2:end]}())
-    return _evaluate(x[1], f1d, Val{1}(), 1, SZ[1], Val(SZ[1:1]))
-end
-
-function chebeval_vecmat(coefs, x::SVector{N,<:Real}, rec, sz) where {N}
-    N == 1 && (return chebeval_novec(coefs, x, rec, sz))
-    x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
-    return _evaluate_vecmat(x0, coefs, sz)
-end
-
-function _evaluate_vecmat(x, coeffs, ::Val{SZ}) where {SZ}
-    N = length(SZ)
-    T = eltype(coeffs)
-    SZ′ = SZ[1:end-1]
-    V = SVector{prod(SZ′),T}
-    coeffs_ = reinterpret(V, coeffs)
-    # coeffs_ = unsafe_wrap(Array, reinterpret(Ptr{V}, pointer(coeffs)), SZ[end])
-    c̃ = _evaluate(x[end], coeffs_, Val{1}(), 1, SZ[N], Val(SZ[N:N]))
-    return _evaluate(deleteat(x, N), c̃, Val{N - 1}(), 1, prod(SZ′), Val(SZ[1:N-1]))
 end
 
 """
