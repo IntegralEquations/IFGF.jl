@@ -230,7 +230,7 @@ function (::GradSingleLayerKernel{Laplace{N}})(
     if N == 2
         return filter * (1 / (d^2) * r)
     elseif N == 3
-        return filter * (1 / (d^3) * r)
+        return filter * (-1 / (d^3) * r)
     else
         error("Not implemented for N = $N")
     end
@@ -246,7 +246,7 @@ function (::DoubleLayerKernel{Laplace{N}})(
     if N == 2
         return filter * (-1 / (d^2) * transpose(r))
     elseif N == 3
-        return filter * (-1 / (d^3) * transpose(r))
+        return filter * (1 / (d^3) * transpose(r))
     else
         error("Not implemented for N = $N")
     end
@@ -277,7 +277,7 @@ function (::HessianSingleLayerKernel{Laplace{N}})(
     d = norm(r)
     filter = !(d ≤ SAME_POINT_TOLERANCE)
     if N == 2
-        return filter * (1 / (d^2) * ((I - 2 * r * transpose(r) / d^2)))
+        return filter * (-1 / (d^2) * ((I - 2 * r * transpose(r) / d^2)))
     elseif N == 3
         ID = SMatrix{3,3,T,9}(1, 0, 0, 0, 1, 0, 0, 0, 1)
         RRT = r * transpose(r) # r ⊗ rᵗ
@@ -423,7 +423,21 @@ function _tol_to_p(::Laplace{3}, tol)
     return 16
 end
 
+# FIXME Please!!
+function _tol_to_p(::Laplace{2}, tol)
+    tol > 1e-3 && return 4
+    tol > 1e-6 && return 8
+    return 16
+end
+
 function _tol_to_p(::Helmholtz{3,T}, tol) where {T}
+    tol > 1e-3 && return 4
+    tol > 1e-6 && return 8
+    return 16
+end
+
+# FIXME Please!!
+function _tol_to_p(::Helmholtz{2,T}, tol) where {T}
     tol > 1e-3 && return 4
     tol > 1e-6 && return 8
     return 16
