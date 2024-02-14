@@ -1,5 +1,6 @@
 # some simple point distributions for testing
 using IFGF
+using StaticArrays
 
 function spheroid(N, r, center, zstretch)
     pts = Vector{IFGF.IFGF.Point3D}(undef, N)
