@@ -273,6 +273,11 @@ end
     real_and_imag(v)
 
 Return a view over the real and imaginary parts of a complex vector `v`.
+
+```jldoctest
+v = rand(ComplexF64,10)
+vr,vi = IFGF.real_and_imag(v)
+```
 """
 function real_and_imag(v::AbstractVector{Complex{T}}) where {T<:Real}
     vfloat = reinterpret(T, v)
