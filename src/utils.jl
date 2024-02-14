@@ -275,8 +275,10 @@ end
 Return a view over the real and imaginary parts of a complex vector `v`.
 
 ```jldoctest
-v = rand(ComplexF64,10)
-vr,vi = IFGF.real_and_imag(v)
+julia> v = [1.0 + 2.0im, 3.0 + 4.0im];
+
+julia> vr,vi = IFGF.real_and_imag(v)
+([1.0, 3.0], [2.0, 4.0])
 ```
 """
 function real_and_imag(v::AbstractVector{Complex{T}}) where {T<:Real}
