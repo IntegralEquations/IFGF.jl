@@ -169,6 +169,7 @@ can be passed as a `Val` using the `sz` argument.
     sz::Val{SZ},
 ) where {N,T,SZ}
     # translate to [-1,1]ᴺ
+    # @assert x ∈ rec "$x ∉ $rec"
     x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
     # certain sizes get vectorized, while other (currently) don't
     if (SZ[1] ∈ (4, 8, 16, 32)) && (T == Float32 || T == Float64)

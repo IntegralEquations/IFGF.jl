@@ -4,6 +4,9 @@ using LinearAlgebra
 using StaticArrays
 using FMM3D
 
+IFGF.use_minimal_conedomain(false)
+IFGF.usethreads(true)
+
 includet(joinpath(IFGF.PROJECT_ROOT, "test", "simple_geometries.jl"))
 
 # parameters
@@ -14,12 +17,12 @@ K = IFGF.SingleLayerKernel(pde)
 # K = LaplaceKernel()
 T = Float64
 
-nn = [10_000 * 4^n for n in 0:3]
+nn = [10_000 * 4^n for n in 4:4]
 # loop number of points
 for n in nn
     Xpts = Ypts = sphere_uniform(n, 1)
     sources = reinterpret(reshape, Float64, Xpts) |> collect
-    I = rand(1:n, 1000)
+    I = rand(1:n, 100)
     B = randn(T, n)
     charges = B
     C = zeros(T, n)

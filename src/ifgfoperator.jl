@@ -111,16 +111,8 @@ function assemble_ifgf(
     Xtree = ClusterTree{TargetTreeData}(target, splitter)
     Ytree = ClusterTree{SourceTreeData{N,Td,typeof(Xtree)}}(source, splitter)
     partition = partition_by_depth(Ytree)
-    # Because we use a closed interpolation
-    # rule, we need to ensure that s ∈ [smin,1], where smin
-    # > 0 (and not zero, otherwise there will be an interpolation point at
-    # infinity, and special care is needed to give a sense to that). Here s =
-    # h/r, r = |x-y|.
-    rmax = maximum(
-        norm(x - y) for x in vertices(container(Xtree)), y in vertices(container(Ytree))
-    )
-    hmin = minimum(radius, partition[end])
-    smin = hmin / rmax
+    # The reference domain inside of which all interpolation nodes must lie
+    smin = 1e-10
     smax = 1 / η
     interp_domain = if N == 2
         HyperRectangle{N,Td}((smin, -π), (smax, π))
@@ -272,7 +264,7 @@ interpolation-space for `node`.
                 end
             end
             # initialize all cones needed to cover far field.
-            for far_target in farlist(source)
+            @usethreads for far_target in farlist(source)
                 @usethreads for x in elements(far_target) # target points
                     I, _ = cone_index(x, source)
                     _addnewcone!(source, I, lck)
@@ -474,7 +466,6 @@ function _chebtransform!(node::SourceTree, ::Val{P}, plan, buff) where {P}
         else
             chebtransform_native!(reshape(vals, P...))
         end
-        # @info ntuple(i->cheb_error_estimate(coefs, i),N)
     end
     return node
 end

@@ -34,10 +34,11 @@ While setting this to `true` reduces the memory footprint by creating
 fewer cones, it also increases the time to assemble the `IFGFOperator`.
 """
 function use_minimal_conedomain(mode = true)
+    mode == false && (@warn "experimental feature: may lead to unexpected behavior")
     @eval _use_minimal_conedomain() = $mode
     return mode
 end
-_use_minimal_conedomain() = false
+_use_minimal_conedomain() = true
 
 # fast invsqrt code taken from here
 # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-julia-8.html
