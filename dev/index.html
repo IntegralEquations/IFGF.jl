@@ -31,54 +31,54 @@ Base.getindex(A::HelmholtzMatrix,i::Int,j::Int) = A(A.X[i],A.Y[j])
 # create the abstract matrix
 k = 8π
 A = HelmholtzMatrix(X,Y,k)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">100000×100000 Main.var&quot;Main&quot;.HelmholtzMatrix:
-   0.108361+0.103773im    …   -0.0361768-0.112188im
-   0.132864+0.0755921im        0.0891103+0.0520693im
-  -0.065549+0.237314im           0.07782-0.0788084im
- -0.0175051+0.139133im        -0.0705206+0.0622072im
-  0.0985763+0.11185im          -0.119984-0.0352325im
-  -0.120712+0.0497854im   …    0.0926161-0.146124im
-   0.293429-0.191954im           0.15974+0.225485im
- -0.0212592+0.138337im         0.0778321-0.078795im
-   0.322386-0.0457877im      -0.00619111-0.115942im
-   0.212845+0.189891im         -0.067853-0.175547im
-           ⋮              ⋱  
-   0.011227+0.0978505im        0.0623442-0.0151019im
-   0.120405+0.0916536im       -0.0777201-0.0431535im
-  0.0156257+0.14172im         -0.0876259+0.0289514im
-  0.0585844-0.0956692im        0.0658914+0.041439im
-   0.144856+0.0543929im   …    -0.131566-0.143961im
-  0.0314646+0.140228im         0.0628886+0.0793693im
-  -0.122579+0.0437951im        0.0148294+0.0739838im
-    0.15882+0.00367448im     -0.00401951+0.0976619im
- -0.0235012+0.250552im         -0.103128+0.217908im</code></pre><p>Note that <code>A</code> is a lazy <span>$100000 \times 100000$</span> matrix which computes its entries on demand; as such, it has a light memory footprint. Trying to instantiate the underlying <code>Matrix{ComplexF64}</code> would most likely result in you running out of memory.</p><p>To build an approximation of <code>A</code> using the <code>IFGFOp</code>, you may use the high-level constructor <a href="references/#IFGF.assemble_ifgf-Tuple{Any, Any, Any}"><code>assemble_ifgf</code></a> as follows:</p><pre><code class="language-julia hljs">L = assemble_ifgf(A,X,Y; tol = 1e-4)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">IFGFOp of ComplexF64 with range 1:100000 × 1:100000
+   -0.0579087-0.104244im     …   -0.0271858+0.136862im
+  0.000794316+0.0979772im        -0.0917893+0.098068im
+      0.12952-0.10771im            0.117657-0.12281im
+     -0.12727-0.000809086im        0.132172+0.0766094im
+    -0.212984+0.0366401im         0.0261353-0.177593im
+    0.0138278-0.0831512im    …    0.0305555-0.0777676im
+     0.146359+0.0510718im       -0.00491575-0.115929im
+   -0.0717842+0.234637im            0.32244-0.0493995im
+    -0.073233+0.0586551im        -0.0358298-0.0786761im
+    -0.211162-0.00830362im       -0.0121923+0.140078im
+             ⋮               ⋱  
+ -0.000593079+0.141428im          0.0425263+0.0906091im
+     0.102211-0.0348374im         -0.127014-0.00392201im
+   -0.0176646+0.0954508im        -0.0201288-0.115174im
+     0.135483+0.0715768im         0.0183974+0.141586im
+     0.322453-0.0512901im    …  -0.00417844+0.254082im
+   -0.0865057+0.103418im         -0.0432649-0.0752545im
+   -0.0872325+0.102716im         -0.0906712+0.0123569im
+    0.0834242-0.0721154im        -0.0348869+0.134527im
+     0.153957+0.0296311im         0.0822395-0.0736219im</code></pre><p>Note that <code>A</code> is a lazy <span>$100000 \times 100000$</span> matrix which computes its entries on demand; as such, it has a light memory footprint. Trying to instantiate the underlying <code>Matrix{ComplexF64}</code> would most likely result in you running out of memory.</p><p>To build an approximation of <code>A</code> using the <code>IFGFOp</code>, you may use the high-level constructor <a href="references/#IFGF.assemble_ifgf-Tuple{Any, Any, Any}"><code>assemble_ifgf</code></a> as follows:</p><pre><code class="language-julia hljs">L = assemble_ifgf(A,X,Y; tol = 1e-4)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">IFGFOp of ComplexF64 with range 1:100000 × 1:100000
 |-- interpolation points per cone: (5, 7, 7)
 |-- maximal meshsize per cone:     (0.514, 1.57, 1.57)
 |-- number of nodes:               585
 |-- number of leaves:              512
-|-- number of active cones:        25067
+|-- number of active cones:        22946
 </code></pre><p>Check the documentation of <a href="references/#IFGF.assemble_ifgf-Tuple{Any, Any, Any}"><code>assemble_ifgf</code></a> for more information on the available options. One important point to keep in mind is that heuristics are used to determine the optimal number of interpolation points given a tolerance <code>tol</code>; if you want to control the number of interpolation points manually, you may pass a <code>p</code> argument to the <code>assemble_ifgf</code> constructor instead.</p><div class="admonition is-info"><header class="admonition-header">Info</header><div class="admonition-body"><p>To approximate oscillatory kernels, the <code>IFGF</code> algorithm adapts to the acoustic size of each of the cells in the source tree in order to keep the interpolation error constant across all levels of the tree. In practice, this means that memory and runtime will depend on both the total number of points <code>n</code> and on the wavenumber <code>k</code>, with smaller <code>k</code> being &quot;easier&quot; to approximate.</p></div></div><p>We can use <code>L</code> in lieu of <code>A</code> to approximate the matrix vector product, as illustrated below:</p><pre><code class="language-julia hljs">x     = randn(ComplexF64,n)
 y     = L*x</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">100000-element Vector{ComplexF64}:
- -0.25058786482580464 + 43.76629023498187im
-    69.89015890382854 + 22.056028336633176im
-   -41.06688941602199 + 1.472702054358943im
-   4.7810157327962415 + 7.444970066773795im
-   -44.05515891254139 - 13.838796052735919im
-   2.8730019968110434 + 56.52586200549119im
-   48.194739331271506 + 23.027254263139444im
-   -47.34692881985338 + 32.420899595469855im
-  -14.109972502103576 + 29.840005003930315im
-     57.9512446643542 + 41.18452054109565im
-                      ⋮
-  -23.865994409346847 - 35.7010716559084im
-  -27.133200693183966 - 25.718244026371227im
-   21.249972343715704 + 36.40821143749093im
-   30.862750061939074 - 27.331536333847282im
-      86.551916993334 - 48.88728083487751im
-    70.40066915600818 + 79.11787987411148im
-   -45.07674560266901 - 5.656263634253918im
-    68.76611970644089 + 65.24197063623384im
-   -5.010981603739856 + 30.480059469379142im</code></pre><p>Note that <code>L</code>, while not as compact as <code>A</code>, still has a relatively light memory footprint:</p><pre><code class="language-julia hljs">gb = Base.summarysize(L) / 1e9
-print(&quot;Size of L: $gb gigabytes&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Size of L: 0.1427337 gigabytes</code></pre><p>The quality of the approximation may be verified by computing the exact value at a few randomly selected set of indices:</p><pre><code class="language-julia hljs">I     = rand(1:m,100)
+ -14.982922602950614 + 32.92338280869845im
+  13.466116515763323 + 1.9822239640428019im
+   38.13706655709504 + 39.99008408111853im
+ -21.832163473769665 - 28.444324520953455im
+  -43.87466274238998 + 59.012064368810684im
+  13.221613928512387 - 52.996228071689835im
+   44.54636476070608 + 19.99115889336408im
+  -9.652665642524664 - 65.00982211215953im
+  2.2739056979093375 - 32.955855933841335im
+  10.834579144205279 + 35.642575227292376im
+                     ⋮
+  10.122466504973382 + 33.55766279785209im
+  118.96252249023289 - 38.247437298670604im
+  -70.17456073227473 - 88.95999239362924im
+   8.305361456164253 - 9.127580753114557im
+  -41.61294189153779 + 8.600725085354927im
+  -3.374599867723396 - 8.438958203217611im
+   6.876859459025063 + 69.00778351923915im
+  -52.12647567722439 + 56.93315088688128im
+  -34.30446636139972 - 51.494400822700996im</code></pre><p>Note that <code>L</code>, while not as compact as <code>A</code>, still has a relatively light memory footprint:</p><pre><code class="language-julia hljs">gb = Base.summarysize(L) / 1e9
+print(&quot;Size of L: $gb gigabytes&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Size of L: 0.133375452 gigabytes</code></pre><p>The quality of the approximation may be verified by computing the exact value at a few randomly selected set of indices:</p><pre><code class="language-julia hljs">I     = rand(1:m,100)
 exact = [sum(A[i,j]*x[j] for j in 1:n) for i in I] # matrix-vector product
 er    = norm(y[I]-exact) / norm(exact) # relative error
-print(&quot;approximate relative error: $er&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">approximate relative error: 2.6878538991777586e-6</code></pre><div class="admonition is-success"><header class="admonition-header">Kernel optimizations</header><div class="admonition-body"><p>To keep things simple in this example, we neglected some important optimizations that can be performed when defining your own kernel. In particular, you can overload some default (generic) methods for your own kernel to provide e.g. a vectorized evaluation using <code>SIMD</code> instructions. We also avoided the possible issue of kernel blowing up at <span>$\boldsymbol{x} = \boldsymbol{y}$</span>.</p></div></div><h2 id="custom-kernel-section"><a class="docs-heading-anchor" href="#custom-kernel-section">Custom kernels</a><a id="custom-kernel-section-1"></a><a class="docs-heading-anchor-permalink" href="#custom-kernel-section" title="Permalink"></a></h2><p>When defining your own kernels, there is one required as well as some optional methods to overload in order to provide kernel-specific information to the constructor. The table below summarizes the interface methods, where <code>Y</code> is a <code>SourceTree</code> object, <code>x</code> is an <code>SVector</code> representing a point, and <code>K</code> is your custom kernel:</p><table><tr><th style="text-align: right"><strong>Method&#39;s name</strong></th><th style="text-align: right"><strong>Required</strong></th><th style="text-align: right"><strong>Brief description</strong></th></tr><tr><td style="text-align: right"><a href="references/#IFGF.wavenumber"><code>wavenumber(K)</code></a></td><td style="text-align: right">Yes</td><td style="text-align: right">Return the wavenumber of your kernel</td></tr><tr><td style="text-align: right"><code>return_type(K)</code></td><td style="text-align: right">No</td><td style="text-align: right">Type of element returned by <code>K(x,y)</code></td></tr><tr><td style="text-align: right"><a href="references/#IFGF.centered_factor-Tuple{Any, Any, Any}"><code>centered_factor(K,x,Y)</code></a></td><td style="text-align: right">No</td><td style="text-align: right">A representative value of <code>K(x,y)</code> for <code>y ∈ Y</code></td></tr><tr><td style="text-align: right"><a href="references/#IFGF.inv_centered_factor-Tuple{Any, Any, Any}"><code>inv_centered_factor(K,x,Y)</code></a></td><td style="text-align: right">No</td><td style="text-align: right">A representative value of <code>inv(K(x,y))</code> for <code>y ∈ Y</code></td></tr><tr><td style="text-align: right"><a href="references/#IFGF.transfer_factor-Tuple{Any, Any, Any}"><code>transfer_factor(K,x,Y)</code></a></td><td style="text-align: right">No</td><td style="text-align: right">Transfer function given by <code>inv_centered_factor(K,x,parent(Y))*centered_factor(K,x,Y)</code></td></tr><tr><td style="text-align: right"><a href="references/#IFGF.near_interaction!-NTuple{7, Any}"><code>near_interaction!(C,K,X,Y,σ,I,J)</code></a></td><td style="text-align: right">No</td><td style="text-align: right">Compute <code>C[i] &lt;- C[i] + ∑ⱼ K(X[i],Y[j])*σ[j]</code> for <code>i ∈ I</code>, <code>j ∈ J</code></td></tr></table><p>Because the <code>IFGF</code> algorithms must adapt its interpolation scheme depending on the frequency of oscillations to control the interpolation error, you must extend the <code>IFGF.wavenumber</code> method. If the kernel is not oscillatory (e.g. exponential kernel, Newtonian potential), simply return <code>0</code>.</p><p>The <code>centered_factor</code>, <code>inv_centered_factor</code>, and <code>transfer_factor</code> have reasonable defaults, and typically are overloaded only for performance reasons (e.g. if some analytic simplifications are available).</p><p>Finally, the <code>near_interaction</code> method is called at the leaves of the source tree to compute the near interactions. Extending this function to make use of e.g. SIMD instructions can significantly speed up some parts of the code.</p><h2 id="Advanced-usage"><a class="docs-heading-anchor" href="#Advanced-usage">Advanced usage</a><a id="Advanced-usage-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-usage" title="Permalink"></a></h2></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="references/">References »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="auto">Automatic (OS)</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.2.1 on <span class="colophon-date" title="Wednesday 14 February 2024 17:34">Wednesday 14 February 2024</span>. Using Julia version 1.10.0.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+print(&quot;approximate relative error: $er&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">approximate relative error: 2.34904961281886e-6</code></pre><div class="admonition is-success"><header class="admonition-header">Kernel optimizations</header><div class="admonition-body"><p>To keep things simple in this example, we neglected some important optimizations that can be performed when defining your own kernel. In particular, you can overload some default (generic) methods for your own kernel to provide e.g. a vectorized evaluation using <code>SIMD</code> instructions. We also avoided the possible issue of kernel blowing up at <span>$\boldsymbol{x} = \boldsymbol{y}$</span>.</p></div></div><h2 id="custom-kernel-section"><a class="docs-heading-anchor" href="#custom-kernel-section">Custom kernels</a><a id="custom-kernel-section-1"></a><a class="docs-heading-anchor-permalink" href="#custom-kernel-section" title="Permalink"></a></h2><p>When defining your own kernels, there is one required as well as some optional methods to overload in order to provide kernel-specific information to the constructor. The table below summarizes the interface methods, where <code>Y</code> is a <code>SourceTree</code> object, <code>x</code> is an <code>SVector</code> representing a point, and <code>K</code> is your custom kernel:</p><table><tr><th style="text-align: right"><strong>Method&#39;s name</strong></th><th style="text-align: right"><strong>Required</strong></th><th style="text-align: right"><strong>Brief description</strong></th></tr><tr><td style="text-align: right"><a href="references/#IFGF.wavenumber"><code>wavenumber(K)</code></a></td><td style="text-align: right">Yes</td><td style="text-align: right">Return the wavenumber of your kernel</td></tr><tr><td style="text-align: right"><code>return_type(K)</code></td><td style="text-align: right">No</td><td style="text-align: right">Type of element returned by <code>K(x,y)</code></td></tr><tr><td style="text-align: right"><a href="references/#IFGF.centered_factor-Tuple{Any, Any, Any}"><code>centered_factor(K,x,Y)</code></a></td><td style="text-align: right">No</td><td style="text-align: right">A representative value of <code>K(x,y)</code> for <code>y ∈ Y</code></td></tr><tr><td style="text-align: right"><a href="references/#IFGF.inv_centered_factor-Tuple{Any, Any, Any}"><code>inv_centered_factor(K,x,Y)</code></a></td><td style="text-align: right">No</td><td style="text-align: right">A representative value of <code>inv(K(x,y))</code> for <code>y ∈ Y</code></td></tr><tr><td style="text-align: right"><a href="references/#IFGF.transfer_factor-Tuple{Any, Any, Any}"><code>transfer_factor(K,x,Y)</code></a></td><td style="text-align: right">No</td><td style="text-align: right">Transfer function given by <code>inv_centered_factor(K,x,parent(Y))*centered_factor(K,x,Y)</code></td></tr><tr><td style="text-align: right"><a href="references/#IFGF.near_interaction!-NTuple{7, Any}"><code>near_interaction!(C,K,X,Y,σ,I,J)</code></a></td><td style="text-align: right">No</td><td style="text-align: right">Compute <code>C[i] &lt;- C[i] + ∑ⱼ K(X[i],Y[j])*σ[j]</code> for <code>i ∈ I</code>, <code>j ∈ J</code></td></tr></table><p>Because the <code>IFGF</code> algorithms must adapt its interpolation scheme depending on the frequency of oscillations to control the interpolation error, you must extend the <code>IFGF.wavenumber</code> method. If the kernel is not oscillatory (e.g. exponential kernel, Newtonian potential), simply return <code>0</code>.</p><p>The <code>centered_factor</code>, <code>inv_centered_factor</code>, and <code>transfer_factor</code> have reasonable defaults, and typically are overloaded only for performance reasons (e.g. if some analytic simplifications are available).</p><p>Finally, the <code>near_interaction</code> method is called at the leaves of the source tree to compute the near interactions. Extending this function to make use of e.g. SIMD instructions can significantly speed up some parts of the code.</p><h2 id="Advanced-usage"><a class="docs-heading-anchor" href="#Advanced-usage">Advanced usage</a><a id="Advanced-usage-1"></a><a class="docs-heading-anchor-permalink" href="#Advanced-usage" title="Permalink"></a></h2></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="references/">References »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="auto">Automatic (OS)</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.2.1 on <span class="colophon-date" title="Thursday 15 February 2024 08:27">Thursday 15 February 2024</span>. Using Julia version 1.10.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
