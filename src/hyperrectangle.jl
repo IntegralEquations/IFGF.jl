@@ -58,7 +58,9 @@ Half the [`diameter`](@ref).
 """
 radius(r::HyperRectangle) = diameter(r) / 2
 
-Base.in(point, h::HyperRectangle) = all(low_corner(h) .<= point .<= high_corner(h))
+function Base.in(point, h::HyperRectangle, tol = 0)
+    return all(low_corner(h) .- tol .<= point .<= high_corner(h) .+ tol)
+end
 
 function vertices(rec::HyperRectangle{2})
     lc = low_corner(rec)

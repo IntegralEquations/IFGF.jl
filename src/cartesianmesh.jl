@@ -98,7 +98,7 @@ function Base.getindex(m::UniformCartesianMesh, I::CartesianIndex)
     N = ambient_dimension(m)
     @assert N == length(I)
     _grids = grids(m)
-    lc = ntuple(N) do dim
+    @inbounds lc = ntuple(N) do dim
         i = I[dim]
         return _grids[dim][i]
     end

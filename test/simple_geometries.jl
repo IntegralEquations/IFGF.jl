@@ -2,24 +2,6 @@
 using IFGF
 using StaticArrays
 
-function spheroid(N, r, center, zstretch)
-    pts = Vector{IFGF.IFGF.Point3D}(undef, N)
-    phi = π * (3 - sqrt(5)) # golden angle in radians
-    for i in 1:N
-        ytmp   = 1 - ((i - 1) / (N - 1)) * 2
-        radius = sqrt(1 - ytmp^2)
-        theta  = phi * i
-        x      = cos(theta) * radius * r + center[1]
-        y      = ytmp * r + center[2]
-        z      = zstretch * sin(theta) * radius * r + center[3]
-        pts[i] = SVector(x, y, z)
-    end
-    # Output
-    return pts
-end
-
-sphere_uniform(N, r, center = (0, 0, 0)) = spheroid(N, r, center, 1)
-
 function _cube(n, w, center = (0, 0, 0), order = 0)
     if order == 0
         cov = identity

@@ -138,12 +138,8 @@ strategy encoded in `splitter`. If `copy_elements` is set to false, the
 `elements` argument are directly stored in the `ClusterTree` and are permuted
 during the tree construction.
 """
-function ClusterTree{D}(
-    elements,
-    splitter = CardinalitySplitter();
-    copy_elements = true,
-) where {D}
-    copy_elements && (elements = deepcopy(elements))
+function ClusterTree{D}(elements, splitter; copy_elements = true) where {D}
+    copy_elements && (elements = copy(elements))
     if splitter isa DyadicSplitter || splitter isa DyadicMaxDepthSplitter
         # make a cube for bounding box for quad/oct trees
         bbox = bounding_box(elements, true)
@@ -175,6 +171,40 @@ function _build_cluster_tree!(current_node, splitter, depth = 0)
         end
     end
     return current_node
+end
+
+# create a new cluster tree which shadows `clt`, but with a different data field
+function shadow_tree(clt::ClusterTree, ::Type{D}) where {D}
+    root = ClusterTree{D}(
+        root_elements(clt),
+        container(clt),
+        index_range(clt),
+        loc2glob(clt),
+        glob2loc(clt),
+        nothing, # children
+        nothing, # parent
+    )
+    _shadow_tree!(root, clt)
+    return root
+end
+
+function _shadow_tree!(shadow::ClusterTree{<:Any,<:Any,D}, clt::ClusterTree) where {D}
+    if !isleaf(clt)
+        for child in children(clt)
+            newchild = ClusterTree{D}(
+                root_elements(child),
+                container(child),
+                index_range(child),
+                loc2glob(child),
+                glob2loc(child),
+                nothing,
+                shadow,
+            )
+            push!(children(shadow), newchild)
+            _shadow_tree!(newchild, child)
+        end
+    end
+    return nothing
 end
 
 """

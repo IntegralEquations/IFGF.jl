@@ -13,5 +13,7 @@ end
 end
 
 @safetestset "Kernels" begin
-    include("kernels_test.jl")
+    include("laplace_test.jl")
+    include("helmholtz_test.jl")
+    include("stokes_test.jl")
 end

@@ -61,22 +61,21 @@ end
 
 """
     assemble_ifgf(K, X, Y; tol, nmax=250)
-    assemble_ifgf(K, X, Y; p, nmax=250)
+    assemble_ifgf(K, X, Y; p, h, nmax=250)
 
 Construct an approximation of the matrix `[K(x,y) for x ∈ X, y ∈ Y]` using the
 [interpolated factored Green function method](https://arxiv.org/abs/2010.02857).
-The parameter `tol` controls the error in the approximation, and `nmax` gives
-the maximum number of points in a leaf of the dyadic trees used.
+The parameter `tol` specifies the desired (relative) error in Frobenius norm of
+the approximation, and `nmax` gives the maximum number of points in a leaf of
+the dyadic trees used.
 
 The kernel `K` must implement `wavenumber(::typeof(K)) --> Number` to return the
 kernel's (typical) wavenumber; for non-oscillatory kernels this is zero.
 
-When `tol` is passed, an interpolation order `p` is estimated based on some
-heuristic. If you know in advance what interpolation order you want, you can
-pass that through the keyword arguemnt `p`. Note that `p` can be a tuple of
-order-per-spatial dimension. Increasing `p` (or decreasing `tol`) will increas
-the computational time, and therefore some tuning may be needed to find the
-right value for your given kernel.
+When `tol` is passed, the number of interpolation points per dimension, `p`, and
+the meshsize `h` is estimated based on some heuristic. If you know in advance a
+good value of `p` and `h` for you function `K` and desired tolerance, it is
+suggested you pass that as a keyword argument instead.
 """
 function assemble_ifgf(
     kernel,
@@ -96,22 +95,28 @@ function assemble_ifgf(
     isconcretetype(Tk) || error("unable to infer a concrete type for the kernel")
     N, Td = length(U), eltype(U)
     # 2. figure out if tolerance + h + p make sense, correct if possible
-    h = isa(h, Number) ? ntuple(i -> Float64(h), N) : h
+    h = isa(h, Number) ? ntuple(i -> Td(h), N) : h
     p = isa(p, Number) ? ntuple(i -> p, N) : p
     if isnothing(tol)
-        isnothing(p) && error("you must pass either tol or p as keyword arguments")
+        (isnothing(p) || isnothing(h)) &&
+            error("you must pass either tol or p and h as keyword arguments")
     else
-        isnothing(p) || (p = nothing; @warn "ignoring p since a tolerance was passed")
+        isnothing(h) || (h = nothing; @warn "ignoring h since tol was passed")
     end
     # 3. Create an admissibility condition unless one is passed
-    η = isnothing(η) ? sqrt(N) : η
+    η = isnothing(η) ? √N : η
     adm = AdmissibilityCondition(η)
     # Trees creation. Note that we must pass the type of data that will be
-    # stored in each node of the cluster tree
+    # stored in each node of the cluster tree.
     Xtree = ClusterTree{TargetTreeData}(target, splitter)
-    Ytree = ClusterTree{SourceTreeData{N,Td,typeof(Xtree)}}(source, splitter)
+    if target === source
+        # create a shadow tree with the same points/boxes but with data
+        Ytree = shadow_tree(Xtree, SourceTreeData{N,Td,typeof(Xtree)})
+    else
+        Ytree = ClusterTree{SourceTreeData{N,Td,typeof(Xtree)}}(source, splitter)
+    end
     partition = partition_by_depth(Ytree)
-    # The reference domain inside of which all interpolation nodes must lie
+    # Create a reference domain inside which all nodes must lie.
     smin = 1e-10
     smax = 1 / η
     interp_domain = if N == 2
@@ -125,24 +130,23 @@ function assemble_ifgf(
     # for `p` and `h`. We apply a simple heuristic for choosing `p`, and an
     # adaptive procedure for chosing `h` after, whereas we estimate the
     # interpolaton order by looking at the last chebyshev coefficients in a few
-    # of the nodes expansions.
+    # of the nodes of the source tree
     k = wavenumber(kernel)
-    h = if isnothing(h)
-        ntuple(i -> i == 1 ? (smax - smin) + eps(Td) : π / 2 + eps(Td), N)
+    p = if isnothing(p)
+        if tol > 1e-3
+            ntuple(i -> 4, N)
+        elseif tol > 1e-12
+            ntuple(i -> 8, N)
+        else
+            ntuple(i -> 16, N)
+        end
     else
-        h
+        p
+    end
+    if !isnothing(tol)
+        h = estimate_cone_size(partition, p, kernel, tol, Tk, interp_domain)
     end
     cone_size = ConeDomainSize(k, h)
-    if !isnothing(tol)
-        p = estimate_interpolation_order(
-            partition,
-            cone_size,
-            interp_domain,
-            kernel,
-            tol,
-            Tk,
-        )
-    end
     @debug "---Cones meshsize           = " h
     @debug "---Number of interp. points = " p
     ## Interaction list.
@@ -154,7 +158,7 @@ function assemble_ifgf(
     # Finally compute the active cones.
     _compute_cone_list!(partition, Val(p), cone_size, interp_domain)
     # call main constructor
-    ifgf = IFGFOp{Tk}(kernel, Xtree, Ytree, p, h, partition, nothing)
+    ifgf = IFGFOp{Tk}(kernel, Xtree, Ytree, p, promote(h...), partition, nothing)
     return ifgf
 end
 
@@ -407,13 +411,8 @@ end
     return C
 end
 
-function _interpolants_to_interpolants(
-    node,
-    K,
-    p::Val{P},
-    buff,
-    cbuff,
-) where {P}
+function _interpolants_to_interpolants(node, K, p::Val{P}, buff, cbuff) where {P}
+    N = length(P)
     T = float_type(node)
     refnodes = chebnodes(p, T)
     @usethreads for I in active_cone_idxs(node)
@@ -425,7 +424,8 @@ function _interpolants_to_interpolants(
         for chd in children(node)
             length(chd) == 0 && continue
             for (i, ŝ) in enumerate(refnodes)
-                x = interp2cart(c0 + c1 .* ŝ, node) # cheb point in physical space
+                s = c0 + c1 .* ŝ
+                x = interp2cart(s, node) # cheb point in physical space
                 idxcone, si = cone_index(x, chd)
                 # transfer block's interpolant to parent's interpolants
                 rec_chd = cone_domain(chd, idxcone)
@@ -525,12 +525,16 @@ end
     near_interaction!(C,K,X,Y,σ,I,J)
 
 Compute `C[i] <-- C[i] + ∑ⱼ K(X[i],Y[j])*σ[j]` for `i ∈ I`, `j ∈ J`. The default
-implementation simply does a double loop over all `i ∈ I` and `j ∈ J`, but you
-override this method for the type of your own custom kernel `K` if you have a
-fast way of computing the full product in-place (e.g. using SIMD instructions).
+implementation simply does a double loop over all `i ∈ I` and `j ∈ J`: override
+this method for the type of your own custom kernel `K` if you have a fast way of
+computing the full product in-place (e.g. using SIMD instructions).
 """
-function near_interaction!(C, K, X, Y, σ, I, J)
-    @warn "using the generic fallback for near_interaction" maxlog = 1
+function near_interaction!(args...)
+    @warn "using generic fallback for near_interaction" maxlog = 1
+    return near_interaction_naive!(args...)
+end
+
+function near_interaction_naive!(C, K, X, Y, σ, I, J)
     for i in I
         for j in J
             C[i] += K(X[i], Y[j]) * σ[j]
@@ -572,33 +576,33 @@ function transfer_factor(K, x, Y)
     return inv_centered_factor(K, x, yparent) * centered_factor(K, x, Y)
 end
 
-function estimate_interpolation_order(partition, ds_func, interp_domain, kernel, tol, Tk)
+function estimate_cone_size(partition, p, kernel, tol, Tk, interp_domain)
     N = ambient_dimension(interp_domain)
-    p = tol ≥ 1e-4 ? ntuple(i -> 3, N) : tol ≥ 1e-8 ? ntuple(i -> 6, N) : ntuple(i -> 9, N)
     ntrials = 10
+    h = ntuple(i -> π + 1e-4, N)
+    iter = 1
+    k = wavenumber(kernel)
     while true
+        func = ConeDomainSize(k, h)
         acc = svector(i -> 0.0, N)
         for i in 1:ntrials
-            node = partition[end] |> rand
-            ds   = ds_func(node)
+            node = partition[end] |> rand # random leaf
+            ds   = func(node)
             msh  = UniformCartesianMesh(interp_domain; step = ds)
             acc  += estimate_interpolation_error(kernel, node, msh, p, Tk)
         end
         ers = acc ./ ntrials
         imax = argmax(ers)
         if maximum(ers) > tol
-            # h = ntuple(i-> i == imax ? h[i] / 2 : h[i], N)
-            p = if imax == 1
-                ntuple(i -> i == 1 ? p[i] + 1 : p[i], N)
-            else
-                ntuple(i -> i == 1 ? p[i] : p[i] + 1, N)
-            end
+            @debug h, ers
+            iter += 1 # going into next iteration, refine the mesh
+            h = h ./ iter
         else
-            @debug "Estimated error per dimension: $(ers)"
+            @debug "Parameters: p=$p, h=$h, ers=$ers"
             break
         end
     end
-    return p
+    return h
 end
 
 function estimate_interpolation_error(kernel, node::SourceTree, msh, p, Tk)
@@ -612,11 +616,12 @@ function estimate_interpolation_error(kernel, node::SourceTree, msh, p, Tk)
         s = chebnodes(p, rec) # cheb points in parameter space
         x = map(si -> interp2cart(si, node), s)
         irange = 1:length(x)
-        vals = zeros(Tk, p...)
         Ypts = root_elements(node)[node.index_range]
-        B = randn(length(Ypts))
+        TB = Base.promote_op(pinv, Tk)
+        B = rand(TB, length(Ypts))
+        vals = zeros(Base.promote_op(*, Tk, eltype(B)), p...)
         jrange = 1:length(B)
-        near_interaction!(vals, kernel, x, Ypts, B, irange, jrange)
+        near_interaction_naive!(vals, kernel, x, Ypts, B, irange, jrange)
         for i in eachindex(x)
             xi = x[i] # cartesian coordinate of node
             vals[i] = inv_centered_factor(kernel, xi, node) * vals[i]

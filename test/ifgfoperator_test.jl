@@ -5,6 +5,7 @@ using IFGF
 
 K(x, y) = 1 / norm(x - y)
 IFGF.wavenumber(::typeof(K)) = 0
+h = 1
 
 @testset "Near field" begin
     @testset "Single leaf" begin
@@ -18,7 +19,7 @@ IFGF.wavenumber(::typeof(K)) = 0
         B = rand(ny)
         B_mat = rand(ny, nz)
         C = zeros(nx)
-        A = assemble_ifgf(K, Xpts, Ypts; p, nmax = 250)
+        A = assemble_ifgf(K, Xpts, Ypts; p, h, nmax = 250)
         mul!(C, A, B, 1, 0)
         @test size(A) == (nx, ny)
         @test C ≈ A_mat * B
@@ -34,7 +35,7 @@ IFGF.wavenumber(::typeof(K)) = 0
         B      = rand(ny)
         B_mat  = rand(ny, nz)
         C      = zeros(nx)
-        A      = assemble_ifgf(K, Xpts, Ypts; p, nmax = 100)
+        A      = assemble_ifgf(K, Xpts, Ypts; p, h, nmax = 100)
         mul!(C, A, B, 1, 0)
         @test size(A) == (nx, ny)
         @test C ≈ A_mat * B
@@ -53,7 +54,7 @@ end
         B      = rand(ny)
         B_mat  = rand(ny, nz)
         C      = zeros(nx)
-        A      = assemble_ifgf(K, Xpts, Ypts; p, nmax = 250)
+        A      = assemble_ifgf(K, Xpts, Ypts; p, h, nmax = 250)
         mul!(C, A, B, 1, 0)
         @test size(A) == (nx, ny)
         @test C ≈ A_mat * B
@@ -69,7 +70,7 @@ end
         B      = rand(ny)
         B_mat  = rand(ny, nz)
         C      = zeros(nx)
-        A      = assemble_ifgf(K, Xpts, Ypts; p, nmax = 100)
+        A      = assemble_ifgf(K, Xpts, Ypts; p, h, nmax = 100)
         mul!(C, A, B, 1, 0)
         @test size(A) == (nx, ny)
         @test C ≈ A_mat * B

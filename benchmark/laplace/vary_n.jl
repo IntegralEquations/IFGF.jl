@@ -1,41 +1,43 @@
 ##
-using IFGF
+import IFGF
 using LinearAlgebra
 using StaticArrays
 using FMM3D
 
-IFGF.use_minimal_conedomain(false)
-IFGF.usethreads(true)
-
-includet(joinpath(IFGF.PROJECT_ROOT, "test", "simple_geometries.jl"))
-
 # parameters
-p = (8, 8, 8)
-h = 1.0
 pde = IFGF.Laplace(; dim = 3)
-K = IFGF.SingleLayerKernel(pde)
-# K = LaplaceKernel()
 T = Float64
+tol = 1e-4
+test_fmm = false
 
-nn = [10_000 * 4^n for n in 4:4]
+nn = [10_000 * 4^n for n in 0:2]
 # loop number of points
 for n in nn
-    Xpts = Ypts = sphere_uniform(n, 1)
-    sources = reinterpret(reshape, Float64, Xpts) |> collect
-    I = rand(1:n, 100)
-    B = randn(T, n)
-    charges = B
-    C = zeros(T, n)
-    exa = [sum(K(Xpts[i], Ypts[j]) * B[j] for j in 1:n) for i in I]
-    tifgf_assemble = @elapsed A = assemble_ifgf(K, Xpts, Ypts; p, h)
-    tifgf_prod = @elapsed mul!(C, A, B, 1, 0)
-    tfmm_tot = @elapsed out = lfmm3d(1e-5, sources; charges, pg = 1)
-    er_ifgf = norm(C[I] - exa, 2) / norm(exa, 2)
-    er_fmm = norm(out.pot[I] - exa, 2) / norm(exa, 2)
     println("n = $n")
+    targets = sources = IFGF.points_on_unit_sphere(n)
+    Xpts = Ypts = reinterpret(SVector{3,Float64}, targets)
+    I = rand(1:n, 1000) |> unique
+    charges = randn(n)
+    GC.gc()
+    tifgf_assemble = @elapsed A =
+        IFGF.plan_laplace3d(T.(targets), T.(sources); charges = T.(charges), tol)
     println("|-- IFGF assemble: $tifgf_assemble")
+    tifgf_prod = @elapsed pot_ifgf = IFGF.laplace3d(A; charges = T.(charges))
     println("|-- IFGF prod:     $tifgf_prod")
-    println("|-- FMM tot:       $tfmm_tot")
-    println("|-- FMM er:        $er_fmm")
+    println("|-- p:             $(A.p)")
+    println("|-- h:             $(A.h)")
+    exa = zeros(n)
+    K = A.kernel
+    IFGF.near_interaction_naive!(exa, K, Xpts, Ypts, charges, I, 1:n)
+    er_ifgf = norm(pot_ifgf[I] - exa[I], 2) / norm(exa[I], 2)
     println("|-- IFGF er:       $er_ifgf")
+    # cleanup and do fmm
+    A = nothing
+    GC.gc()
+    if test_fmm
+        tfmm_tot = @elapsed out = lfmm3d(tol, sources; charges, pg = 1)
+        er_fmm = norm(out.pot[I] - exa[I], 2) / norm(exa[I], 2)
+        println("|-- FMM tot:       $tfmm_tot")
+        println("|-- FMM er:        $er_fmm")
+    end
 end

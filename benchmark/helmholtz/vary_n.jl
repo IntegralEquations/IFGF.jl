@@ -4,38 +4,50 @@ using LinearAlgebra
 using StaticArrays
 using FMM3D
 
-includet(joinpath(IFGF.PROJECT_ROOT, "test", "simple_geometries.jl"))
-
 # parameters
-p = (4, 6, 6)
-T = ComplexF64
-ppw = 22.4 # point per wavelength
-r = 1
-area = 4π * r^2
-nn = [10_000 * 4^n for n in 0:3]
+F = Float64
+T = Complex{F}
+tol = 1e-4
+ppw = 10 # point per wavelength
+area = 4π # surface area of unit sphere for computing k
 fixed_k = false # either fix k and increase n, or increase k with n
+test_fmm = true
+
+nn = [10_000 * 4^n for n in 0:6]
 # loop number of points
 for n in nn
-    k = fixed_k ? 2π : sqrt(n / ppw^2 / area * 4π^2)
+    k = fixed_k ? 2π : sqrt(n / ppw^2 / area * (2π)^2)
     pde = IFGF.Helmholtz(; k, dim = 3)
     K = IFGF.SingleLayerKernel(pde)
-    X = Y = sphere_uniform(n, r)
-    sources = reinterpret(reshape, Float64, X) |> collect
-    I = rand(1:n, 100)
-    charges = randn(T, n)
-    B = charges
-    C = zeros(T, n)
-    exa = [sum(K(X[i], Y[j]) * B[j] for j in 1:n) for i in I]
-    tifgf_assemble = @elapsed A = assemble_ifgf(K, X, Y; p)
-    tifgf_prod = @elapsed mul!(C, A, B, 1, 0)
-    er_ifgf = norm(C[I] - exa, 2) / norm(exa, 2)
-    tfmm_tot = @elapsed out = hfmm3d(1e-3, k, sources; charges, pg = 1)
-    er_fmm = norm(out.pot[I] - exa, 2) / norm(exa, 2)
     println("n = $n")
     println("|-- k:             $(trunc(k,digits=2))")
+    targets = sources = IFGF.points_on_unit_sphere(n)
+    Xpts = Ypts = reinterpret(SVector{3,Float64}, targets)
+    I = rand(1:n, 1000) |> unique
+    charges = randn(ComplexF64, n)
+    tifgf_assemble = @elapsed A = IFGF.plan_helmholtz3d(
+        F.(k),
+        F.(targets),
+        F.(sources);
+        charges = T.(charges),
+        tol,
+    )
     println("|-- IFGF assemble: $tifgf_assemble")
+    println("|-- p:             $(A.p)")
+    println("|-- h:             $(A.h)")
+    tifgf_prod = @elapsed pot_ifgf = IFGF.helmholtz3d(A; charges = T.(charges))
     println("|-- IFGF prod:     $tifgf_prod")
-    println("|-- FMM tot:       $tfmm_tot")
-    println("|-- FMM er:        $er_fmm")
+    exa = zeros(ComplexF64, n)
+    IFGF.near_interaction_naive!(exa, K, Xpts, Ypts, charges, I, 1:n)
+    er_ifgf = norm(pot_ifgf[I] - exa[I], 2) / norm(exa[I], 2)
     println("|-- IFGF er:       $er_ifgf")
+    # cleanup and test fmm
+    A = nothing
+    GC.gc()
+    if test_fmm
+        tfmm_tot = @elapsed out = hfmm3d(tol, k, sources; charges, pg = 1)
+        println("|-- FMM tot:       $tfmm_tot")
+        er_fmm = norm(out.pot[I] - exa[I], 2) / norm(exa[I], 2)
+        println("|-- FMM er:        $er_fmm")
+    end
 end

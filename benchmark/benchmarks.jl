@@ -52,6 +52,22 @@ FORWARD_MAP["Laplace3D"]["single layer"] = @benchmarkable(
     ),
 )
 
+FORWARD_MAP["Laplace3D"]["double layer"] = @benchmarkable(
+    IFGF.forward_map(L; dipvecs = x),
+    evals = 1,
+    samples = 1,
+    setup = (
+        L = IFGF.plan_forward_map(
+            IFGF.Laplace(; dim = 3),
+            $X,
+            $Y;
+            tol = $tol,
+            dipvecs = true,
+        );
+        x = randn(SVector{3,Float64}, npts)
+    ),
+)
+
 FORWARD_MAP["Helmholtz3D"]["single layer"] = @benchmarkable(
     IFGF.forward_map(L; charges = x),
     evals = 1,
@@ -65,5 +81,21 @@ FORWARD_MAP["Helmholtz3D"]["single layer"] = @benchmarkable(
             charges = true,
         );
         x = randn(ComplexF64, npts)
+    ),
+)
+
+FORWARD_MAP["Helmholtz3D"]["double layer"] = @benchmarkable(
+    IFGF.forward_map(L; dipvecs = x),
+    evals = 1,
+    samples = 1,
+    setup = (
+        L = IFGF.plan_forward_map(
+            IFGF.Helmholtz(; dim = 3, k = 20π),
+            $X,
+            $Y;
+            tol = $tol,
+            dipvecs = true,
+        );
+        x = randn(SVector{3,ComplexF64}, npts)
     ),
 )
