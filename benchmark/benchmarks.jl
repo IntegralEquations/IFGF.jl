@@ -10,7 +10,7 @@ X = Y = IFGF.points_on_unit_sphere(npts)
 
 # parameters which are held constant across all benchmarks
 p = 8
-h = π/2
+h = π / 2
 
 const PLAN = SUITE["plan"]
 
