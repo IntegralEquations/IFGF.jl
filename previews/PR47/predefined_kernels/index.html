@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Predefined kernels · IFGF.jl</title><meta name="title" content="Predefined kernels · IFGF.jl"/><meta property="og:title" content="Predefined kernels · IFGF.jl"/><meta property="twitter:title" content="Predefined kernels · IFGF.jl"/><meta name="description" content="Documentation for IFGF.jl."/><meta property="og:description" content="Documentation for IFGF.jl."/><meta property="twitter:description" content="Documentation for IFGF.jl."/><meta property="og:url" content="https://github.com/IntegralEquations/IFGF.jl/predefined_kernels/"/><meta property="twitter:url" content="https://github.com/IntegralEquations/IFGF.jl/predefined_kernels/"/><link rel="canonical" href="https://github.com/IntegralEquations/IFGF.jl/predefined_kernels/"/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">IFGF.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li class="is-active"><a class="tocitem" href>Predefined kernels</a><ul class="internal"><li><a class="tocitem" href="#Laplace-3D-operator"><span>Laplace 3D operator</span></a></li><li><a class="tocitem" href="#Helmholtz-3D-operator"><span>Helmholtz 3D operator</span></a></li><li><a class="tocitem" href="#Stokes-3D-operator"><span>Stokes 3D operator</span></a></li></ul></li><li><a class="tocitem" href="../custom_kernels/">Custom kernels</a></li><li><a class="tocitem" href="../references/">References</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Predefined kernels</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Predefined kernels</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/IntegralEquations/IFGF.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/IntegralEquations/IFGF.jl/blob/main/docs/src/predefined_kernels.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="predefined-kernels-section"><a class="docs-heading-anchor" href="#predefined-kernels-section">Predefined kernels</a><a id="predefined-kernels-section-1"></a><a class="docs-heading-anchor-permalink" href="#predefined-kernels-section" title="Permalink"></a></h1><p>While it is certainly possible to define your own kernel, doing so efficiently can be non-trivial and time-consuming. <em>IFGF.jl</em> provides a few predefined kernels that are commonly used in practice. If you need a kernel that is not listed here, or if you have implemented a custom kernel and would like for it to be added to the library, please open an issue and/or PR on the <a href="https://github.com/IntegralEquations/IFGF.jl">GitHub repository</a>.</p><p>The kernel-specific <em>API</em> is heavily inspired by the <a href="https://fmm3d.readthedocs.io">FMM3D library</a>, and provides functions to efficiently compute sums of the form</p><p class="math-container">\[u(\boldsymbol{x}_i) = \sum_{j=1}^N G(\boldsymbol{x}_i - \boldsymbol{y}_j) c_j +\gamma_{1,\boldsymbol{y}} G(\boldsymbol{x}_i - \boldsymbol{y}_j) v_j,\]</p><p>where <span>$\boldsymbol{x_i}$</span> are the target locations, <span>$\boldsymbol{y}_j$</span> are the source locations, <span>$G(\boldsymbol{x} - \boldsymbol{y})$</span> is (up to a constant factor) the fundamental solution of a given partial differential operator, <span>$\gamma_{1,\boldsymbol{y}}$</span> its (generalized) Neumann trace, and <span>$c_i,v_i$</span> are input vectors of the appropriate size. <em>IFGF.jl</em> computes the sum above in log-linear complexity.</p><p>Each predefined kernel comes with an associated <code>plan</code> function that precomputes the necessary data structure required to efficiently apply the forward map. If you need to compute the forward map multiple times with the same kernel, it is a good idea to build a <em>plan</em>.</p><p>In the following, we provide a brief overview of the predefined kernels.</p><div class="admonition is-success"><header class="admonition-header">Single-precision</header><div class="admonition-body"><p>All predefined kernels support single-precision arithmetic. If you do not need double-precision, you can save memory and computation time by using single-precision to represent your data.</p></div></div><h2 id="Laplace-3D-operator"><a class="docs-heading-anchor" href="#Laplace-3D-operator">Laplace 3D operator</a><a id="Laplace-3D-operator-1"></a><a class="docs-heading-anchor-permalink" href="#Laplace-3D-operator" title="Permalink"></a></h2><article class="docstring"><header><a class="docstring-article-toggle-button fa-solid fa-chevron-down" href="javascript:;" title="Collapse docstring"></a><a class="docstring-binding" id="IFGF.laplace3d" href="#IFGF.laplace3d"><code>IFGF.laplace3d</code></a> — <span class="docstring-category">Function</span></header><section><div><pre><code class="language-julia hljs">laplace3d(targets, sources; charges = nothing, dipvecs = nothing, grad =
+false, kwargs...)</code></pre><p>Compute the sum</p><p class="math-container">\[u(\boldsymbol{x}_i) = \sum_{j=1}^n \frac{c_j}{|| \boldsymbol{x}_i - \boldsymbol{y}_j ||} -
+\frac{(\boldsymbol{x}_i - \boldsymbol{y}_j)^\top v_j}{|| \boldsymbol{x}_i - \boldsymbol{y}_j ||^3} ,\]</p><p>where <span>$c_j$</span> are the <code>charges</code> and <code>v_j</code> are the <code>dipvecs</code>.</p><p><strong>Input:</strong></p><ul><li><code>targets::Matrix{T}</code>: <code>3 x n</code> matrix of target points.</li><li><code>sources::Matrix{T}</code>: <code>3 x m</code> matrix of source points.</li><li><code>charges::Vector{T}</code>: vector of <code>n</code> charges.</li><li><code>dipvecs::Matrix{T}</code>: <code>3 x m</code> matrix of dipole vectors.</li><li><code>grad::Bool</code>: if <code>true</code>, the gradient is computed instead</li><li><code>kwargs...</code>: additional keyword arguments passed to <a href="../references/#IFGF.assemble_ifgf-Tuple{Any, Any, Any}"><code>assemble_ifgf</code></a> (e.g. <code>tol</code>)</li></ul><p><strong>Output</strong></p><ul><li><code>u</code>: the potential at the target points if <code>grad=false</code>, or the gradient as a <code>3 x n</code> matrix if <code>grad=true</code>.</li></ul></div><a class="docs-sourcelink" target="_blank" href="https://github.com/IntegralEquations/IFGF.jl/blob/fe8cc2cae15981d7d643befb504e021875091b8a/src/Kernels/laplace.jl#L1-L29">source</a></section></article><p>Forward map:</p><pre><code class="language-julia hljs">using IFGF
+m = 100_000
+targets = sources = rand(3, m)
+charges = rand(m)
+dipvecs = rand(3,m)
+IFGF.laplace3d(targets, sources; charges, tol=1e-4)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">100000-element Vector{Float64}:
+  91701.74746811196
+  98056.69668559129
+  77681.24295614855
+ 112702.58004695395
+  93371.29302290163
+  91513.13664462978
+  95593.9772571677
+ 106214.96368576407
+  84305.88932030802
+  92620.24224669037
+      ⋮
+  89927.2328218745
+ 101816.24881315781
+  95604.35975885179
+ 118252.24194581217
+  82930.66477553025
+  73431.66360980127
+  99512.43628113941
+  71148.14031916438
+ 113126.83604009156</code></pre><p>Plan and forward map:</p><pre><code class="language-julia hljs">L = IFGF.plan_laplace3d(targets, sources; charges, dipvecs, tol=1e-4)
+out  = zero(charges)
+IFGF.laplace3d!(out, L; charges, dipvecs)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">100000-element Vector{Float64}:
+ 131187.049005123
+ -44707.70384172954
+ 113603.72580797519
+ 155198.29537094192
+   7698.867532081858
+ -61586.59264605395
+ 227679.75284597333
+  13515.303346237875
+ 130157.74738496984
+  81912.1883401112
+      ⋮
+ 193403.8001889098
+ 163754.8398075064
+  74245.8645860607
+  82508.83963286386
+  92188.59864403475
+ 142817.7132838433
+ 196080.23093008302
+ 258021.4387524402
+  92400.8720590831</code></pre><h2 id="Helmholtz-3D-operator"><a class="docs-heading-anchor" href="#Helmholtz-3D-operator">Helmholtz 3D operator</a><a id="Helmholtz-3D-operator-1"></a><a class="docs-heading-anchor-permalink" href="#Helmholtz-3D-operator" title="Permalink"></a></h2><article class="docstring"><header><a class="docstring-article-toggle-button fa-solid fa-chevron-down" href="javascript:;" title="Collapse docstring"></a><a class="docstring-binding" id="IFGF.helmholtz3d" href="#IFGF.helmholtz3d"><code>IFGF.helmholtz3d</code></a> — <span class="docstring-category">Function</span></header><section><div><pre><code class="language-julia hljs">helmholtz3d(k, targets, sources; charges = nothing, dipvecs = nothing, grad =
+false, kwargs...)</code></pre><p>Compute the sum</p><p class="math-container">\[u(\boldsymbol{x}_i) = \sum_{j=1}^n \frac{c_j e^{i k || \boldsymbol{x}_i - \boldsymbol{y}_j ||}}{|| \boldsymbol{x}_i - \boldsymbol{y}_j ||} + \nabla_{\boldsymbol{y}}^\top \left( \frac{e^{i k || \boldsymbol{x}_i - \boldsymbol{y}_j ||}}{|| \boldsymbol{x}_i - \boldsymbol{y}_j ||} \right) v_j,\]</p><p>where <span>$c_j$</span> are the <code>charges</code> and <code>v_j</code> are the <code>dipvecs</code>.</p><p><strong>Input:</strong></p><ul><li><code>k</code>: the wavenumber.</li><li><code>targets::Matrix{T}</code>: <code>3 x n</code> matrix of target points.</li><li><code>sources::Matrix{T}</code>: <code>3 x m</code> matrix of source points.</li><li><code>charges::Vector{Complex{T}}</code>: vector of <code>n</code> charges.</li><li><code>dipvecs::Matrix{Complex{T}}</code>: <code>3 x m</code> matrix of dipole vectors.</li><li><code>grad::Bool</code>: if <code>true</code>, the gradient is computed instead</li><li><code>kwargs...</code>: additional keyword arguments passed to <a href="../references/#IFGF.assemble_ifgf-Tuple{Any, Any, Any}"><code>assemble_ifgf</code></a>.</li></ul><p><strong>Output</strong></p><ul><li><code>u</code>: the potential at the target points if <code>grad=false</code>, or the gradient as a <code>3 x n</code> matrix if <code>grad=true</code>.</li></ul></div><a class="docs-sourcelink" target="_blank" href="https://github.com/IntegralEquations/IFGF.jl/blob/fe8cc2cae15981d7d643befb504e021875091b8a/src/Kernels/helmholtz.jl#L1-L28">source</a></section></article><p>Forward map:</p><pre><code class="language-julia hljs">using IFGF
+m = 100_000
+targets = sources = rand(3, m)
+charges = rand(ComplexF64,m)
+dipvecs = rand(ComplexF64,3,m)
+k = 2π
+IFGF.helmholtz3d(k, targets, sources; charges, tol=1e-4)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">100000-element Vector{ComplexF64}:
+   -68948.6702991663 - 27596.280811136843im
+  -4170.198921313972 - 11241.447224513313im
+  -62668.22571345249 - 25736.759799870837im
+  -34637.79878360852 - 23732.998327074638im
+ -2035.5722701587129 - 10422.327226944435im
+ -15320.805209564547 - 13199.520849622748im
+ -16700.055121674202 - 11216.730771961955im
+  -54527.86961000651 - 25417.574737418494im
+  -45774.62067016904 - 20893.14399308512im
+  -43204.72910899996 - 23128.224357730956im
+                     ⋮
+  3924.3510908533426 - 2419.8043552181516im
+ -11716.959576697614 - 12899.360006690016im
+  -6272.968610573461 - 12641.542084734698im
+  -545.9242656568695 - 9853.553120345976im
+   -73849.9278425459 - 28433.11176220233im
+  -20901.70361166425 - 14301.108898247296im
+   -33233.7774344726 - 19442.956102450215im
+   3642.282839617026 - 3851.4032520010087im
+  -34771.85731418011 - 22641.91336068885im</code></pre><p>Plan and forward map:</p><pre><code class="language-julia hljs">L = IFGF.plan_helmholtz3d(k, targets, sources; charges, dipvecs, tol=1e-6)
+out  = zero(charges)
+IFGF.helmholtz3d!(out, L; charges, dipvecs)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">100000-element Vector{ComplexF64}:
+ -16140.609797851193 - 13744.957672146164im
+ -126127.60924375115 - 70143.65750068608im
+  46169.539788476424 + 1646.9611567194734im
+ -234778.33538052323 - 38247.1042180681im
+ -14753.677474621794 + 9509.397105351534im
+   -44564.2035612813 - 53742.8449606798im
+   -357689.957043189 - 140783.75338003965im
+ -178973.44636967088 - 35980.92983437501im
+ -147541.98159771488 - 45966.9650483945im
+  29240.951962998617 - 61211.592437665546im
+                     ⋮
+   55822.17083016918 + 19639.401478883938im
+  221972.63425479815 + 70676.4371790749im
+ -125125.00727501037 - 31763.97138165482im
+ -113082.35016010172 - 57893.2497533965im
+ -217536.62047577577 - 54725.8538800698im
+    95712.4543898799 + 31180.80245574729im
+   -283903.101701704 - 65055.72537069319im
+   34455.41403598189 - 1734.8821271286379im
+ -197900.92895453138 - 31302.652830619816im</code></pre><h2 id="Stokes-3D-operator"><a class="docs-heading-anchor" href="#Stokes-3D-operator">Stokes 3D operator</a><a id="Stokes-3D-operator-1"></a><a class="docs-heading-anchor-permalink" href="#Stokes-3D-operator" title="Permalink"></a></h2><div class="admonition is-warning"><header class="admonition-header">Warning</header><div class="admonition-body"><p>Stokes 3D operator should be considered experimental. Please report any issues you encounter.</p></div></div><article class="docstring"><header><a class="docstring-article-toggle-button fa-solid fa-chevron-down" href="javascript:;" title="Collapse docstring"></a><a class="docstring-binding" id="IFGF.stokes3d" href="#IFGF.stokes3d"><code>IFGF.stokes3d</code></a> — <span class="docstring-category">Function</span></header><section><div><pre><code class="language-julia hljs">stokes3d(targets, sources; stoklet = nothing, strslet = nothing, strsvec =
+nothing, grad = false, kwargs...)</code></pre><p>Compute the sum</p><p class="math-container">\[u(\boldsymbol{x}_i) = \sum_{j=1}^n \left( \frac{I}{d} + \frac{\boldsymbol{r}_{ij}\boldsymbol{r}_{ij}^\top}{2d_{ij}^3} \right) \boldsymbol{\sigma}_j +
+\frac{3(\boldsymbol{\nu}_j \cdot \boldsymbol{r}_{ij})(\boldsymbol{\mu}_j\cdot\boldsymbol{r}_{ij}) \boldsymbol{r}_{ij}}{d_{ij}^5},\]</p><p>where <span>$\boldsymbol{r}_{ij} = |\boldsymbol{x}_i - \boldsymbol{y}_j|$</span>, <span>$d_{ij} = |\boldsymbol{r_{ij}}|$</span>, <span>$\boldsymbol{\sigma}_j$</span> are the Stokeslet strengths, <span>$\boldsymbol{\mu}_j$</span> are the stresslet strengths, and <span>$\boldsymbol{\nu}_j$</span> are the stresslet orientations.</p><p><strong>Input:</strong></p><ul><li><code>targets::Matrix{T}</code>: <code>3 x n</code> matrix of target points.</li><li><code>sources::Matrix{T}</code>: <code>3 x m</code> matrix of source points.</li><li><code>stoklet::Matrix{T}</code>: <code>3 × n</code> matrix of stokeslets</li><li><code>strslet::Matrix{T}</code>: <code>6 x m</code> matrix of stresslet densities (indices <code>1:3</code>) and orientations (indices <code>4:6</code>)</li><li><code>grad::Bool</code>: if <code>true</code>, the gradient is computed instead</li><li><code>kwargs...</code>: additional keyword arguments passed to <a href="../references/#IFGF.assemble_ifgf-Tuple{Any, Any, Any}"><code>assemble_ifgf</code></a>.</li></ul><p><strong>Output</strong></p><ul><li><code>u</code>: <code>3 x n</code> matrix giving the velocity at the target points if <code>grad=false</code>, or <code>3 x 3 × n</code> matrix representing the gradient of <code>u</code> if <code>grad=true</code>.</li></ul></div><a class="docs-sourcelink" target="_blank" href="https://github.com/IntegralEquations/IFGF.jl/blob/fe8cc2cae15981d7d643befb504e021875091b8a/src/Kernels/stokes.jl#L1-L32">source</a></section></article><p>Forward map:</p><pre><code class="language-julia hljs">using IFGF
+m = 100_000
+targets = sources = rand(3, m)
+stoklet  = rand(3,m)
+strslet = nothing
+IFGF.stokes3d(targets, sources; stoklet, strslet, tol=1e-4)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">3×100000 Matrix{Float64}:
+ 67899.8  69196.6  59513.7  63670.9  …  53686.8  70675.3  60995.4  49390.5
+ 59962.1  69236.9  56537.8  66459.4     48676.7  65432.7  51979.5  45100.2
+ 68474.9  64745.5  60369.9  63717.1     55004.7  70985.5  61160.9  49500.2</code></pre><p>Plan and forward map:</p><pre><code class="language-julia hljs">L = IFGF.plan_stokes3d(targets, sources; stoklet, strslet, tol=1e-4)
+out = zero(stoklet)
+IFGF.stokes3d!(out, L; stoklet)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">3×100000 Matrix{Float64}:
+ 67899.8  69196.6  59513.7  63670.9  …  53686.8  70675.3  60995.4  49390.5
+ 59962.1  69236.9  56537.8  66459.4     48676.7  65432.7  51979.5  45100.2
+ 68474.9  64745.5  60369.9  63717.1     55004.7  70985.5  61160.9  49500.2</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../custom_kernels/">Custom kernels »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.3.0 on <span class="colophon-date" title="Wednesday 13 March 2024 10:38">Wednesday 13 March 2024</span>. Using Julia version 1.10.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
