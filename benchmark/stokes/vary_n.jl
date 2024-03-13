@@ -21,7 +21,7 @@ for n in nn
     stoklet = randn(3, n)
     GC.gc()
     tifgf_assemble = @elapsed A =
-        IFGF.plan_stokes3d(T.(targets), T.(sources); stoklet = T.(stoklet), tol, p = 8)
+        IFGF.plan_stokes3d(T.(targets), T.(sources); stoklet = T.(stoklet), tol)
     println("|-- IFGF assemble: $tifgf_assemble")
     tifgf_prod = @elapsed pot_ifgf = IFGF.stokes3d(A; stoklet = T.(stoklet))
     println("|-- IFGF prod:     $tifgf_prod")
