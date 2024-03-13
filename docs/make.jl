@@ -24,6 +24,8 @@ makedocs(;
     ),
     pages = [
         "Home" => "index.md",
+        "Predefined kernels" => "predefined_kernels.md",
+        "Custom kernels" => "custom_kernels.md",
         "References" => "references.md",
     ],
     warnonly = ON_CI ? false : Documenter.except(:linkcheck_remotes),

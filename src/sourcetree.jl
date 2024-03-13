@@ -179,7 +179,7 @@ function interpolation_domain(source::SourceTree, ::Val{P}) where {P}
     ub = svector(i -> typemin(Td), N) # upper bound
     # nodes on far_list
     for far_target in farlist(source)
-        @usethreads for x in elements(far_target) # target points
+        for x in elements(far_target) # target points
             s  = cart2interp(x, source)
             lb = min.(lb, s)
             ub = max.(ub, s)
@@ -188,7 +188,7 @@ function interpolation_domain(source::SourceTree, ::Val{P}) where {P}
     refnodes = chebnodes(P, Td)
     if !isroot(source)
         source_parent = parent(source)
-        @usethreads for I in active_cone_idxs(source_parent)
+        for I in active_cone_idxs(source_parent)
             rec    = cone_domain(source_parent, I)
             lc, hc = low_corner(rec), high_corner(rec)
             c0     = (lc + hc) / 2
@@ -235,7 +235,7 @@ function element_index(s::SVector{N}, m::UniformCartesianMesh{N}) where {N}
     lc = low_corner(m)
     uc = high_corner(m)
     # assert that lc <= s <= uc?
-    # @assert all(lc .<= s .<= uc)
+    # @assert all(lc .<= s .<= uc) "$s ∉ $m"
     I = ntuple(N) do n
         q = (s[n] - lc[n]) / Δs[n]
         i = ceil(Int, q)

@@ -25,8 +25,15 @@ include("targettree.jl")
 include("sourcetree.jl")
 include("chebinterp.jl")
 include("ifgfoperator.jl")
-include("kernels.jl")
-include("simd.jl")
+
+# implementation of specific kernels
+include("Kernels/kernels.jl")
+include("Kernels/laplace.jl")
+include("Kernels/helmholtz.jl")
+include("Kernels/stokes.jl")
+
+#
+# include("simd.jl")
 
 export
 # methods

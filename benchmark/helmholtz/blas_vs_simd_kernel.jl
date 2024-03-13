@@ -20,28 +20,28 @@ function _helmholtz3d_sl_fast(C, X, Y, σ, k)
             s, c = sincos(k * d)
             zr = inv(4π * d) * c
             zi = inv(4π * d) * s
-            Cr[i] += zr * σr[j] - zi * σi[j]
-            Ci[i] += zi * σr[j] + zr * σi[j]
+            Cr[i] += (!iszero(d)) * (zr * σr[j] - zi * σi[j])
+            Ci[i] += (!iszero(d)) * (zi * σr[j] + zr * σi[j])
         end
     end
     return C
 end
 
-T = ComplexF64
+T = Float64
 
 nn = []
 t1 = []
 t2 = []
 for k in 1:3
     m = n = 25 * 2^k
-    C = zeros(ComplexF64, m)
-    σ = rand(ComplexF64, n)
-    X = rand(3, m)
-    Y = rand(3, n)
-    k = 1
+    C = zeros(Complex{T}, m)
+    σ = rand(Complex{T}, n)
+    X = Y = rand(T, 3, m)
+    # Y = rand(T, 3, n)
+    k = one(T)
     M = [
-        exp(im * k * norm(x - y)) * inv(4π * norm(x - y)) for x in eachcol(X),
-        y in eachcol(Y)
+        (norm(x - y) != 0) * (exp(im * k * norm(x - y)) * inv(4π * norm(x - y))) for
+        x in eachcol(X), y in eachcol(Y)
     ]
     er = _helmholtz3d_sl_fast(copy(C), X, Y, σ, k) - mul!(copy(C), M, σ) |> norm
     b1 = @belapsed _helmholtz3d_sl_fast($C, $X, $Y, $σ, $k)

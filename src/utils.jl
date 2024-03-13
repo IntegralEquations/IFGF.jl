@@ -34,10 +34,11 @@ While setting this to `true` reduces the memory footprint by creating
 fewer cones, it also increases the time to assemble the `IFGFOperator`.
 """
 function use_minimal_conedomain(mode = true)
+    mode == false && (@warn "experimental feature: may lead to unexpected behavior")
     @eval _use_minimal_conedomain() = $mode
     return mode
 end
-_use_minimal_conedomain() = false
+_use_minimal_conedomain() = true
 
 # fast invsqrt code taken from here
 # https://benchmarksgame-team.pages.debian.net/benchmarksgame/program/nbody-julia-8.html
@@ -57,11 +58,19 @@ meshsize `ds`.
 Calling `f(node)` will return the meshsize for the given `node`, where `f` is a
 `ConeDomainSize` object.
 """
-struct ConeDomainSize{N,T}
+struct ConeDomainSize{N,T,S}
     k::T
-    ds::SVector{N,Float64}
+    ds::SVector{N,S}
 end
 ConeDomainSize(k, ds::Tuple) = ConeDomainSize(k, SVector(ds))
+
+"""
+    const ACOUSTIC_SIZE_THRESHOLD
+
+Boxes with a size larger than `ACOUSTIC_SIZE_THRESHOLD` times the wavelength are
+considered "high-frequency", and their cone-domain size will be refined.
+"""
+const ACOUSTIC_SIZE_THRESHOLD = Ref(1)
 
 function (f::ConeDomainSize)(node)
     if iszero(f.k)
@@ -71,7 +80,11 @@ function (f::ConeDomainSize)(node)
         # k: wavenumber
         bbox = container(node)
         w    = maximum(high_corner(bbox) - low_corner(bbox))
-        δ    = max(f.k * w / 2, 1)
+        # FIXME: it is not clear when boxes should be considered
+        # "high-frequency" so that we need to refine the cone-domain size.
+        λ = 2π / f.k
+        c = ACOUSTIC_SIZE_THRESHOLD[]
+        δ = max(w / (c * λ), 1)
         return f.ds / δ
     end
 end
@@ -273,7 +286,21 @@ end
     real_and_imag(v)
 
 Return a view over the real and imaginary parts of a complex vector `v`.
+
+```jldoctest
+julia> v = [1.0 + 2.0im, 3.0 + 4.0im];
+
+julia> vr,vi = IFGF.real_and_imag(v)
+([1.0, 3.0], [2.0, 4.0])
+```
 """
+function real_and_imag(v::AbstractMatrix{Complex{T}}) where {T<:Real}
+    vfloat = reinterpret(T, v)
+    vr = @views vfloat[1:2:end, :]
+    vi = @views vfloat[2:2:end, :]
+    return vr, vi
+end
+
 function real_and_imag(v::AbstractVector{Complex{T}}) where {T<:Real}
     vfloat = reinterpret(T, v)
     vr = @views vfloat[1:2:end]
@@ -300,3 +327,46 @@ Floating type used to represent the underlying structure (e.g. `Float32`,
 """
 float_type(::Type{Complex{T}}) where {T} = T
 float_type(::Type{SVector{<:,T}}) where {T<:Real} = T
+
+"""
+    _unsafe_wrap_vector_of_sarray(A::Array)
+
+Wrap the memory in `A` so that its first `n-1` dimensions are interpreted as an
+`SArray`, returning a `Vector{<:SArray}` type.
+
+This function uses `unsafe_wrap`, and therefore is unsafe for the same reasons
+`unsafe_wrap` is.
+"""
+function _unsafe_wrap_vector_of_sarray(A::Array{T,N}) where {T,N}
+    @assert isbitstype(T) "type $T is not a bitstype"
+    dims = ntuple(i -> size(A, i), N - 1)
+    n    = size(A, N) # size of last dimension
+    V    = SArray{Tuple{dims...},T,N - 1,prod(dims)}
+    return unsafe_wrap(Array, convert(Ptr{V}, pointer(A)), n)
+end
+
+function points_on_unit_sphere(N, T = Float64)
+    pts = Matrix{T}(undef, 3, N)
+    phi = π * (3 - sqrt(5)) # golden angle in radians
+    for i in 1:N
+        y = 1 - ((i - 1) / (N - 1)) * 2
+        radius = sqrt(1 - y^2)
+        theta = phi * i
+        pts[1, i] = cos(theta) * radius
+        pts[2, i] = y
+        pts[3, i] = sin(theta) * radius
+    end
+    return pts
+end
+
+function points_on_circle(n)
+    pts = Vector{Point2D}(undef, n)
+    h = 2 * π / n
+    for i in 1:n
+        angle = i * h
+        x = cos(angle)
+        y = sin(angle)
+        pts[i] = SVector(x, y)
+    end
+    return pts
+end

@@ -85,6 +85,10 @@ function chebtransform_fftw!(vals::AbstractArray)
     plan = FFTW.plan_r2r!(copy(vals), FFTW.REDFT00)
     return chebtransform_fftw!(vals, plan)
 end
+function chebtransform_fftw!(vals::AbstractArray{T}) where {T<:SArray}
+    plan = FFTW.plan_r2r!(zeros(eltype(T), size(vals)), FFTW.REDFT00)
+    return chebtransform_fftw!(vals, plan)
+end
 
 function chebtransform_fftw!(vals::AbstractArray{<:Number,N}, plan::FFTW.FFTWPlan) where {N}
     FFTW.mul!(vals, plan, vals) # type-I DCT
@@ -102,10 +106,17 @@ function chebtransform_fftw!(vals::AbstractArray{<:Number,N}, plan::FFTW.FFTWPla
     return vals
 end
 
-function chebtransform_fftw!(vals::AbstractArray{<:SVector{K}}, plan) where {K}
+function chebtransform_fftw!(vals::AbstractArray{T}, plan) where {T<:SArray}
+    K = length(T)
     coefs = ntuple(i -> chebtransform_fftw!([v[i] for v in vals], plan), Val{K}())
-    return copyto!(vals, SVector{K}.(coefs...))
+    return copyto!(vals, T.(coefs...))
 end
+
+# function chebtransform_fftw!(vals::AbstractArray{T}, plan) where {T<:SArray}
+#     K = length(T)
+#     coefs = ntuple(i -> chebtransform_fftw!([v[i] for v in vals], plan), Val{K}())
+#     return copyto!(vals, T(coefs...))
+# end
 
 """
     chebtransform_native!(vals)
@@ -155,6 +166,13 @@ function chebtransform1d!(coefs, vals)
 end
 chebtransform1d!(vals) = chebtransform1d!(vals, copy(vals))
 
+struct PlanCheb1d
+    buf::Vector{Float64}
+    cvec::Vector{Float64}
+end
+
+_use_vectorized_chebeval() = true
+
 """
     chebeval(coefs,x,rec[,sz])
 
@@ -169,20 +187,25 @@ can be passed as a `Val` using the `sz` argument.
     sz::Val{SZ},
 ) where {N,T,SZ}
     # translate to [-1,1]ᴺ
+    # @assert x ∈ rec "$x ∉ $rec"
     x0 = @. (x - rec.low_corner) * 2 / (rec.high_corner - rec.low_corner) - 1
     # certain sizes get vectorized, while other (currently) don't
-    if (SZ[1] ∈ (4, 8, 16, 32)) && (T == Float32 || T == Float64)
+    if (SZ[1] ∈ (4, 8, 16, 32)) &&
+       (T == Float32 || T == Float64) &&
+       _use_vectorized_chebeval()
         x1, xr... = x0
         V = Vec{SZ[1],T}
         n = prod(SZ) ÷ SZ[1]
         coefs_ = reinterpret(V, coefs)
         f1d = _evaluate(xr, coefs_, Val{N - 1}(), 1, n, Val{SZ[2:end]}())
         return _evaluate(x1, f1d, Val{1}(), 1, SZ[1], Val(SZ[1:1]))
-    elseif (SZ[1] ∈ (4, 8, 16, 32)) && (T == ComplexF32 || T == ComplexF64)
+    elseif (SZ[1] ∈ (4, 8, 16, 32)) &&
+           (T == ComplexF32 || T == ComplexF64) &&
+           _use_vectorized_chebeval()
         x1, xr... = x0
         F = float_type(T)
-        V = Vec{2 * SZ[1],F}
         n = prod(SZ) ÷ SZ[1]
+        V = Vec{2 * SZ[1],F}
         coefs_ = reinterpret(V, coefs)
         f1d = _evaluate(xr, coefs_, Val{N - 1}(), 1, n, Val{SZ[2:end]}())
         mask_real = ntuple(i -> 2(i - 1), Val{SZ[1]}()) |> Val
@@ -221,11 +244,7 @@ statically which allows for various improvements by the compiler (like loop unro
         return muladd(xd, bₖ, c₁) - bₖ₊₁
     else
         Δi = len ÷ n # column-major stride of current dimension
-
-        # we recurse downward on dim for cache locality,
-        # since earlier dimensions are contiguous
         dim′ = Val{dim - 1}()
-
         c₁ = _evaluate(x, c, dim′, i1, Δi, sz)
         if n ≤ 2
             n == 1 && return c₁ + one(xd) * zero(c₁)

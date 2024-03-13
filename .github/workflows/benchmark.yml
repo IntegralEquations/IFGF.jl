@@ -5,6 +5,7 @@ on:
     branches:
       - 'main'
     tags: '*'
+  pull_request:
 
 permissions:
   pull-requests: write
@@ -18,7 +19,7 @@ jobs:
             - uses: actions/checkout@v2
             - uses: julia-actions/setup-julia@v1
               with:
-                version: "1.8"
+                version: "1"
             - uses: julia-actions/cache@v1
             - name: Extract Package Name from Project.toml
               id: extract-package-name
@@ -30,7 +31,7 @@ jobs:
                 JULIA_NUM_THREADS: 2
               run: |
                 # Lightweight build step, as sometimes the runner runs out of memory:
-                julia -e 'ENV["JULIA_PKG_PRECOMPILE_AUTO"]=0; import Pkg; Pkg.add(;url="https://github.com/MilesCranmer/AirspeedVelocity.jl.git")'
+                julia -e 'ENV["JULIA_PKG_PRECOMPILE_AUTO"]=0; import Pkg; Pkg.add(;url="https://github.com/maltezfaria/AirspeedVelocity.jl.git")'
                 julia -e 'ENV["JULIA_PKG_PRECOMPILE_AUTO"]=0; import Pkg; Pkg.build("AirspeedVelocity")'
             - name: Add ~/.julia/bin to PATH
               run: |
