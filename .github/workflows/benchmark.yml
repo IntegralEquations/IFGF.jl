@@ -16,7 +16,7 @@ jobs:
         # run if PR has `run benchmark` label 
         if: contains(github.event.pull_request.labels.*.name, 'run benchmark') 
         steps:
-            - uses: actions/checkout@v2
+            - uses: actions/checkout@v4
             - uses: julia-actions/setup-julia@v1
               with:
                 version: "1"
