@@ -2,100 +2,35 @@ using BenchmarkTools
 using IFGF
 using StaticArrays
 
-include(joinpath(IFGF.PROJECT_ROOT, "test", "simple_geometries.jl"))
-
 const SUITE = BenchmarkGroup()
 
-# point configuration used throughout the benchmarks
+# point configuration
 npts = 1_000_000
-radius = 1
-X = Y = sphere_uniform(npts, radius)
+X = Y = IFGF.points_on_unit_sphere(npts)
 
 # parameters which are held constant across all benchmarks
-tol = 1e-4
+p = 8
+h = π/2
 
 const PLAN = SUITE["plan"]
 
 PLAN["Laplace3D"]["single layer"] = @benchmarkable(
-    IFGF.plan_forward_map(IFGF.Laplace(; dim = 3), $X, $Y; tol = $tol, charges = true),
+    IFGF.laplace3d($X, $Y; charges, p = $p, h = $h),
     evals = 1,
-    samples = 1
+    samples = 1,
+    setup = (charges = randn(npts)),
 )
 
 PLAN["Helmholtz3D"]["single layer"] = @benchmarkable(
-    IFGF.plan_forward_map(
-        IFGF.Helmholtz(; dim = 3, k = 20π),
-        $X,
-        $Y;
-        tol = $tol,
-        charges = true,
-    ),
-    evals = 1,
-    samples = 1
-)
-
-const FORWARD_MAP = SUITE["forward map"]
-
-FORWARD_MAP["Laplace3D"]["single layer"] = @benchmarkable(
-    IFGF.forward_map(L; charges = x),
+    IFGF.helmholtz3d(k, $X, $Y; charges, p = $p, h = $h),
     evals = 1,
     samples = 1,
-    setup = (
-        L = IFGF.plan_forward_map(
-            IFGF.Laplace(; dim = 3),
-            $X,
-            $Y;
-            tol = $tol,
-            charges = true,
-        );
-        x = randn(Float64, npts)
-    ),
+    setup = (charges = randn(ComplexF64, npts); k = 20π),
 )
 
-FORWARD_MAP["Laplace3D"]["double layer"] = @benchmarkable(
-    IFGF.forward_map(L; dipvecs = x),
+PLAN["Stokes3D"]["single layer"] = @benchmarkable(
+    IFGF.stokes3d($X, $Y; stoklet, p = $p, h = $h),
     evals = 1,
     samples = 1,
-    setup = (
-        L = IFGF.plan_forward_map(
-            IFGF.Laplace(; dim = 3),
-            $X,
-            $Y;
-            tol = $tol,
-            dipvecs = true,
-        );
-        x = randn(SVector{3,Float64}, npts)
-    ),
-)
-
-FORWARD_MAP["Helmholtz3D"]["single layer"] = @benchmarkable(
-    IFGF.forward_map(L; charges = x),
-    evals = 1,
-    samples = 1,
-    setup = (
-        L = IFGF.plan_forward_map(
-            IFGF.Helmholtz(; dim = 3, k = 20π),
-            $X,
-            $Y;
-            tol = $tol,
-            charges = true,
-        );
-        x = randn(ComplexF64, npts)
-    ),
-)
-
-FORWARD_MAP["Helmholtz3D"]["double layer"] = @benchmarkable(
-    IFGF.forward_map(L; dipvecs = x),
-    evals = 1,
-    samples = 1,
-    setup = (
-        L = IFGF.plan_forward_map(
-            IFGF.Helmholtz(; dim = 3, k = 20π),
-            $X,
-            $Y;
-            tol = $tol,
-            dipvecs = true,
-        );
-        x = randn(SVector{3,ComplexF64}, npts)
-    ),
+    setup = (stoklet = randn(3, npts)),
 )
