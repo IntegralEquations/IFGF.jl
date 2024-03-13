@@ -31,54 +31,54 @@ Base.getindex(A::HelmholtzMatrix,i::Int,j::Int) = A(A.X[i],A.Y[j])
 # create the abstract matrix
 k = 4π
 A = HelmholtzMatrix(X,Y,k)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">100000×100000 Main.var&quot;Main&quot;.HelmholtzMatrix:
-         0.0-0.0im         …    0.0440097-0.0747552im
-   0.0261558+0.128032im        -0.0801208-0.0588631im
-  -0.0456411+0.112457im          0.049136-0.070813im
-  -0.0193957-0.0906715im       -0.0452369+0.112681im
- -0.00060692-0.0909989im        -0.318518+0.246442im
- -0.00193188-0.0911009im   …   -0.0311898-0.0885021im
-   0.0158876+0.128373im         -0.146322-0.197095im
-   0.0221171-0.0861181im        0.0931412+0.104913im
-   0.0121504-0.0890118im       -0.0457833-0.0835697im
-  -0.0654839-0.072204im         0.0276579+0.127916im
-            ⋮              ⋱  
-   0.0788408+0.00619581im        0.158003+0.00641585im
-   -0.058264-0.0770929im       -0.0279814-0.0892463im
-   0.0779079-0.0239774im       0.00269046-0.090661im
-   -0.032157-0.0882546im        0.0778208+0.113786im
-  -0.0671691-0.0709224im   …    -0.321405+0.23579im
-    0.156574-0.066123im          0.154808+0.0195408im
- -0.00483927+0.63352im        -0.00350388-0.0911971im
-    0.160334-0.0438021im          0.13757-0.114372im
-   0.0440097-0.0747552im              0.0-0.0im</code></pre><p>Note that <code>A</code> is a lazy <span>$100000 \times 100000$</span> matrix which computes its entries on demand; as such, it has a light memory footprint. Trying to instantiate the underlying <code>Matrix{ComplexF64}</code> would most likely result in you running out of memory.</p><p>To build an approximation of <code>A</code>, simply do:</p><pre><code class="language-julia hljs">L = assemble_ifgf(A,X,Y; tol = 1e-4)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">IFGFOp of ComplexF64 with range 1:100000 × 1:100000
+         0.0-0.0im        …  -0.0102496+0.1256im
+  -0.0782852-0.0608489im       0.159273-0.000754271im
+  -0.0889614-0.0475123im     0.00722629+0.128041im
+    0.147247+0.0403049im      -0.100741+0.0472805im
+   -0.153805-0.193816im      -0.0334907+0.118358im
+   -0.242579-0.129994im   …  -0.0828883+0.0805134im
+ -0.00910221-0.213945im        0.139513+0.0554267im
+  -0.0157099+0.12433im         0.159375-0.00142244im
+    0.119907-0.140235im         0.01058-0.0893571im
+  -0.0818793-0.214902im      -0.0689231-0.0695266im
+            ⋮             ⋱  
+  0.00815555+0.128104im      -0.0357292-0.0872458im
+    0.137439-0.114602im        0.138732+0.0567533im
+  -0.0597112-0.216965im      -0.0957698-0.0357573im
+   -0.271516-0.0947531im     0.00917543-0.0896414im
+    0.134608+0.0632991im  …   -0.256751+0.385746im
+  -0.0246119+0.121706im        0.152995+0.0254152im
+   0.0944289-0.166311im       0.0557432+0.12256im
+  0.00359387-0.0905475im      0.0787295-0.0197261im
+  -0.0102496+0.1256im               0.0-0.0im</code></pre><p>Note that <code>A</code> is a lazy <span>$100000 \times 100000$</span> matrix which computes its entries on demand; as such, it has a light memory footprint. Trying to instantiate the underlying <code>Matrix{ComplexF64}</code> would most likely result in you running out of memory.</p><p>To build an approximation of <code>A</code>, simply do:</p><pre><code class="language-julia hljs">L = assemble_ifgf(A,X,Y; tol = 1e-4)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">IFGFOp of ComplexF64 with range 1:100000 × 1:100000
 |-- interpolation points per cone: (8, 8, 8)
 |-- maximal meshsize per cone:     (1.57, 1.57, 1.57)
 |-- number of nodes:               585
 |-- number of leaves:              512
-|-- number of active cones:        4393
+|-- number of active cones:        4481
 </code></pre><p>Check the documentation of <a href="references/#IFGF.assemble_ifgf-Tuple{Any, Any, Any}"><code>assemble_ifgf</code></a> for more information on the available options.</p><p>You can now use <code>L</code> in lieu of <code>A</code> to approximate the matrix vector product, as illustrated below:</p><pre><code class="language-julia hljs">x     = randn(ComplexF64,m)
 y     = L*x</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">100000-element Vector{ComplexF64}:
-  -33.89665742905829 + 14.114456115086178im
-  11.469035830394294 + 21.864088905890007im
-   50.85099616721041 - 7.437105894049111im
-   -27.8588056337474 + 46.11196416815604im
- -1.4148666458244321 - 20.137312802623388im
-  10.234790358288281 + 48.88346346882133im
-  -50.46461065710473 + 12.102613686999007im
- -19.714525113205987 - 44.10432981954134im
-  -6.987274038324351 + 39.43459469119799im
-  31.194246200970728 - 29.506109682184185im
+  2.1322376257685622 + 0.8799483187117305im
+  -4.676692064762088 + 34.707430644604194im
+    52.5759545237268 + 9.831477769632112im
+ -25.140663275342355 - 7.7877067782313265im
+  13.330906615296321 - 70.46210155070986im
+ -3.3863254422926694 - 98.11577029482122im
+ -60.031744447639156 + 8.268729057527324im
+  44.225145431500394 + 2.0731697743371225im
+ -21.019927495492254 + 122.12966969525917im
+  -42.13849399721747 + 34.67150171387945im
                      ⋮
- -19.860980647395287 - 1.3464757300166623im
-   5.144460053638635 - 38.133495957496464im
-   49.76325582395491 + 7.787222437443989im
-  25.027290786244794 + 6.80311924034099im
-  -5.569514815153966 + 1.0552653826722969im
- -12.928529565168702 - 8.202031167734145im
-  14.838838296004072 - 18.843170971095063im
-  -69.57197578921578 + 20.32544371758486im
-  -81.47406256892413 + 40.5708252498242im</code></pre><p>Note that <code>L</code>, while not as compact as <code>A</code>, still has a relatively light memory footprint:</p><pre><code class="language-julia hljs">gb = Base.summarysize(L) / 1e9
-print(&quot;Size of L: $gb gigabytes&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Size of L: 0.071971172 gigabytes</code></pre><p>The quality of the approximation may be verified by computing the exact value at a few randomly selected set of indices:</p><pre><code class="language-julia hljs">I     = rand(1:m,100)
+  -4.287061924585842 + 29.608292299509152im
+  18.543757472318852 + 73.48615826109464im
+ -1.2020491184712645 - 34.76216157537009im
+   13.48648004796628 - 21.25876676746238im
+  -9.234707034386387 - 34.12430979591418im
+   37.28865176396591 - 8.747203611395953im
+   20.70635075284838 - 12.10783280091671im
+  1.4641233867900558 + 22.20503290163439im
+  46.446840751901775 - 29.653850703199133im</code></pre><p>Note that <code>L</code>, while not as compact as <code>A</code>, still has a relatively light memory footprint:</p><pre><code class="language-julia hljs">gb = Base.summarysize(L) / 1e9
+print(&quot;Size of L: $gb gigabytes&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Size of L: 0.073221036 gigabytes</code></pre><p>The quality of the approximation may be verified by computing the exact value at a few randomly selected set of indices:</p><pre><code class="language-julia hljs">I     = rand(1:m,100)
 exact = [sum(A[i,j]*x[j] for j in 1:m) for i in I] # matrix-vector product
 er    = norm(y[I]-exact) / norm(exact) # relative error
-print(&quot;approximate relative error: $er&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">approximate relative error: 1.479003994659471e-5</code></pre><p>To keep things simple, we neglected some important optimizations that can be performed when defining your own kernel. See the <a href="custom_kernels/#custom-kernel-section">custom kernels</a> for more information.</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="predefined_kernels/">Predefined kernels »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.3.0 on <span class="colophon-date" title="Wednesday 13 March 2024 10:05">Wednesday 13 March 2024</span>. Using Julia version 1.10.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+print(&quot;approximate relative error: $er&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">approximate relative error: 1.8917861272780744e-5</code></pre><p>To keep things simple, we neglected some important optimizations that can be performed when defining your own kernel. See the <a href="custom_kernels/#custom-kernel-section">custom kernels</a> for more information.</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="predefined_kernels/">Predefined kernels »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.3.0 on <span class="colophon-date" title="Wednesday 13 March 2024 10:17">Wednesday 13 March 2024</span>. Using Julia version 1.10.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
