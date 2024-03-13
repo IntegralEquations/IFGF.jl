@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Home · IFGF.jl</title><meta name="title" content="Home · IFGF.jl"/><meta property="og:title" content="Home · IFGF.jl"/><meta property="twitter:title" content="Home · IFGF.jl"/><meta name="description" content="Documentation for IFGF.jl."/><meta property="og:description" content="Documentation for IFGF.jl."/><meta property="twitter:description" content="Documentation for IFGF.jl."/><meta property="og:url" content="https://github.com/IntegralEquations/IFGF.jl/"/><meta property="twitter:url" content="https://github.com/IntegralEquations/IFGF.jl/"/><link rel="canonical" href="https://github.com/IntegralEquations/IFGF.jl/"/><script data-outdated-warner src="assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="assets/documenter.js"></script><script src="search_index.js"></script><script src="siteinfo.js"></script><script src="../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href>IFGF.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li class="is-active"><a class="tocitem" href>Home</a><ul class="internal"><li><a class="tocitem" href="#overview-section"><span>Overview</span></a></li><li><a class="tocitem" href="#Simple-example"><span>Simple example</span></a></li></ul></li><li><a class="tocitem" href="predefined_kernels/">Predefined kernels</a></li><li><a class="tocitem" href="custom_kernels/">Custom kernels</a></li><li><a class="tocitem" href="references/">References</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Home</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Home</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/IntegralEquations/IFGF.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/IntegralEquations/IFGF.jl/blob/main/docs/src/index.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="home-section"><a class="docs-heading-anchor" href="#home-section">IFGF.jl</a><a id="home-section-1"></a><a class="docs-heading-anchor-permalink" href="#home-section" title="Permalink"></a></h1><p><em>A Julia implementation of the Interpolated Factored Green Function (IFGF) Method  on adaptive trees</em></p><h2 id="overview-section"><a class="docs-heading-anchor" href="#overview-section">Overview</a><a id="overview-section-1"></a><a class="docs-heading-anchor-permalink" href="#overview-section" title="Permalink"></a></h2><p>This package implements an algorithm for approximating the forward map (i.e. the matrix-vector product) of certain kernel matrices, where <strong>kernel matrix</strong> will be used to refer to any matrix <span>$A \in \mathbb{F}^{m\times n}$</span> whose entries can be computed from the following three components:</p><ul><li>a vector of target elements <span>$X = \left\{ \boldsymbol{x}_i \right\}_{i=1}^m$</span> </li><li>a vector of source elements <span>$Y = \left\{ \boldsymbol{y}_i \right\}_{i=1}^n$</span> </li><li>a kernel function <span>$K(x,y) : X \times Y \to \mathbb{F}$</span>, where <span>$\mathbb{F}$</span> is the return type of the kernel (and of the underlying matrix)</li></ul><p>The entries of a kernel matrix are given by the explicit formula <span>$A_{i,j} = K(\boldsymbol{x}_i,\boldsymbol{y}_j)$</span>. Typically, <span>$X$</span> and <span>$Y$</span> are vectors of points in <span>$\mathbb{R}^d$</span>, and <span>$K$</span> is a function mapping elements of <span>$X$</span> and <span>$Y$</span> into <span>$\mathbb{R}$</span> or <span>$\mathbb{C}$</span>.</p><p>Provided <span>$K$</span> has sufficient structure, an approximation of the product <span>$Ax$</span> can be computed in linear or log-linear complexity by various well known algorithms such as the <em>Fast Multipole Method</em> or <em>hierarchical matrices</em>; this package implements another acceleration algorithm termed <em>Interpolated Factored Green Function (IFGF)</em> method.</p><p><em>IFGF.jl</em> comes loaded with a few predefined kernels arising in mathematical physics; check out the <a href="predefined_kernels/#predefined-kernels-section">predefined kernels</a> section for more details. Otherwise, setting up your own kernel is straightforward, as shown next.</p><h2 id="Simple-example"><a class="docs-heading-anchor" href="#Simple-example">Simple example</a><a id="Simple-example-1"></a><a class="docs-heading-anchor-permalink" href="#Simple-example" title="Permalink"></a></h2><p>To illustrate how to set up the <code>IFGFOp</code>, let <span>$X$</span> and <span>$Y$</span> be a set of random points on the unit cube, and take <span>$K$</span> to be the Helmholtz Green function in three dimensions:</p><p class="math-container">\[    K(\boldsymbol{x},\boldsymbol{y}) = \frac{e^{ik|\boldsymbol{x}-\boldsymbol{y}|}}{4\pi |\boldsymbol{x}-\boldsymbol{y}|}\]</p><p>Setting up the aforementioned kernel matrix can be done as follows:</p><pre><code class="language-julia hljs">using IFGF, LinearAlgebra, StaticArrays
+import IFGF: wavenumber
+
+# random points on a cube
+const Point3D = SVector{3,Float64}
+m = 100_000
+X = Y = rand(Point3D,m)
+
+# define a the kernel matrix
+struct HelmholtzMatrix &lt;: AbstractMatrix{ComplexF64}
+    X::Vector{Point3D}
+    Y::Vector{Point3D}
+    k::Float64
+end
+
+# indicate that this is an ocillatory kernel with wavenumber `k`
+wavenumber(A::HelmholtzMatrix) = A.k
+
+# functor interface
+function (K::HelmholtzMatrix)(x,y)
+    k = wavenumber(K)
+    d = norm(x-y)
+    return (d!=0) * (exp(im*k*d)*inv(4*pi*d)) # skip x == y case
+end
+
+# abstract matrix interface
+Base.size(::HelmholtzMatrix) = length(X), length(Y)
+Base.getindex(A::HelmholtzMatrix,i::Int,j::Int) = A(A.X[i],A.Y[j])
+
+# create the abstract matrix
+k = 4π
+A = HelmholtzMatrix(X,Y,k)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">100000×100000 Main.var&quot;Main&quot;.HelmholtzMatrix:
+          0.0-0.0im         …   -0.189475-0.174218im
+     0.111272+0.0906698im      0.00968692+0.128193im
+   -0.0907075-0.0448203im      -0.0445682+0.113045im
+     0.161212-0.0286666im      -0.0306662+0.119506im
+   -0.0114105+0.125351im       -0.0368651+0.11688im
+   -0.0332176-0.0879708im   …  -0.0363355-0.0870596im
+ -0.000198467-0.0909635im      -0.0984838-0.0298046im
+    0.0420215+0.0607865im      0.00722402-0.0899985im
+    0.0634864-0.0556296im       -0.105301-0.00596725im
+    0.0449153+0.0589967im      -0.0276653-0.0893133im
+             ⋮              ⋱  
+    0.0627169+0.0428456im       0.0410128-0.0767966im
+    -0.286806+0.330376im       0.00526002-0.211025im
+    -0.059036-0.0766137im      0.00688448-0.0900562im
+     0.150566-0.0862537im      0.00268494+0.127638im
+     0.159149+3.74383e-5im  …    0.158945-0.0542386im
+   -0.0963561-0.034552im       -0.0647817+0.099342im
+   -0.0995793-0.0270806im      -0.0896431+0.07075im
+   0.00122783-0.0908257im       0.0313384+0.12756im
+    -0.189475-0.174218im              0.0-0.0im</code></pre><p>Note that <code>A</code> is a lazy <span>$100000 \times 100000$</span> matrix which computes its entries on demand; as such, it has a light memory footprint. Trying to instantiate the underlying <code>Matrix{ComplexF64}</code> would most likely result in you running out of memory.</p><p>To build an approximation of <code>A</code>, simply do:</p><pre><code class="language-julia hljs">L = assemble_ifgf(A,X,Y; tol = 1e-4)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">IFGFOp of ComplexF64 with range 1:100000 × 1:100000
+|-- interpolation points per cone: (8, 8, 8)
+|-- maximal meshsize per cone:     (1.57, 1.57, 1.57)
+|-- number of nodes:               585
+|-- number of leaves:              512
+|-- number of active cones:        4474
+</code></pre><p>Check the documentation of <a href="references/#IFGF.assemble_ifgf-Tuple{Any, Any, Any}"><code>assemble_ifgf</code></a> for more information on the available options.</p><p>You can now use <code>L</code> in lieu of <code>A</code> to approximate the matrix vector product, as illustrated below:</p><pre><code class="language-julia hljs">x     = randn(ComplexF64,m)
+y     = L*x</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">100000-element Vector{ComplexF64}:
+ -7.5672280620746655 + 69.65230804134784im
+ -40.440837709383096 + 54.026104274530766im
+   40.90748973366922 - 26.722207058580196im
+  17.334447711685556 + 34.47861962228064im
+  -7.732449548834702 - 45.39358866715993im
+   93.92777433002242 - 9.12490235125497im
+ -0.8854320049941222 - 31.02198150524618im
+  -31.96071878055822 + 38.169632282170625im
+    8.91551705437008 + 91.43620076195073im
+ 0.13166521682915544 + 59.58441300840605im
+                     ⋮
+  -81.33714904499311 + 6.294275875432071im
+   17.12756076773387 + 26.095694561779528im
+   25.98679085063169 + 8.495219828859584im
+  26.414543812452834 - 4.23639904892971im
+  14.983902251372513 - 95.63373587836722im
+  25.944149693972086 - 44.97827786126261im
+ -41.504225382059154 + 8.295574839957151im
+ -27.395301499591696 + 25.95092237262817im
+  14.095278829886087 + 43.080884745231636im</code></pre><p>Note that <code>L</code>, while not as compact as <code>A</code>, still has a relatively light memory footprint:</p><pre><code class="language-julia hljs">gb = Base.summarysize(L) / 1e9
+print(&quot;Size of L: $gb gigabytes&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Size of L: 0.07312646 gigabytes</code></pre><p>The quality of the approximation may be verified by computing the exact value at a few randomly selected set of indices:</p><pre><code class="language-julia hljs">I     = rand(1:m,100)
+exact = [sum(A[i,j]*x[j] for j in 1:m) for i in I] # matrix-vector product
+er    = norm(y[I]-exact) / norm(exact) # relative error
+print(&quot;approximate relative error: $er&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">approximate relative error: 2.1482277017122527e-5</code></pre><p>To keep things simple, we neglected some important optimizations that can be performed when defining your own kernel. See the <a href="custom_kernels/#custom-kernel-section">custom kernels</a> for more information.</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="predefined_kernels/">Predefined kernels »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.3.0 on <span class="colophon-date" title="Wednesday 13 March 2024 10:41">Wednesday 13 March 2024</span>. Using Julia version 1.10.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
