@@ -31,54 +31,54 @@ Base.getindex(A::HelmholtzMatrix,i::Int,j::Int) = A(A.X[i],A.Y[j])
 # create the abstract matrix
 k = 4π
 A = HelmholtzMatrix(X,Y,k)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">100000×100000 Main.var&quot;Main&quot;.HelmholtzMatrix:
-        0.0-0.0im        -0.0668516+0.590196im   …    -0.147408-0.196636im
- -0.0668516+0.590196im          0.0-0.0im             0.0679787-0.185411im
-  0.0135494-0.20889im       0.15729-0.0629518im       0.0679082+0.118265im
- -0.0231319-0.215889im    0.0804475-0.177201im        -0.326381+0.0294944im
-   0.128023+0.0724451im   0.0172235+0.128373im        0.0984273-0.162815im
- -0.0599783-0.0760153im  -0.0908884-0.0445305im  …  -0.00150577+0.070613im
-   0.118861+0.0831552im   0.0874271+0.108521im       -0.0456641-0.0836208im
-   0.160575-0.0114972im   0.0181286+0.128366im        0.0339642+0.127243im
-  0.0798339+0.112761im     0.157079+0.0107343im      -0.0473167-0.0828944im
-   0.115565+0.0865524im    0.139546-0.110803im       -0.0942995-0.0386182im
-           ⋮                                     ⋱  
- -0.0877842-0.0492285im  -0.0516629-0.0808034im      -0.0137614-0.0911692im
-  0.0951833-0.165665im     0.125052+0.0761449im       0.0207966-0.206743im
-   0.038707-0.200236im     0.126516-0.13159im        -0.0760397+0.583139im
-   0.155332-0.0710792im   -0.114292-0.208202im       -0.0670488+0.0974003im
-  0.0241478+0.128161im   -0.0450065+0.112807im   …   0.00481804-0.090379im
-  0.0894395-0.170424im    0.0599014-0.19008im          0.156745+0.0121686im
- -0.0631815+0.100656im   -0.0834298+0.0798041im       0.0282519-0.0836904im
-   0.153216-0.0784028im   0.0513644-0.194517im       -0.0929537-0.04106im
-  -0.147408-0.196636im    0.0679787-0.185411im              0.0-0.0im</code></pre><p>Note that <code>A</code> is a lazy <span>$100000 \times 100000$</span> matrix which computes its entries on demand; as such, it has a light memory footprint. Trying to instantiate the underlying <code>Matrix{ComplexF64}</code> would most likely result in you running out of memory.</p><p>To build an approximation of <code>A</code>, simply do:</p><pre><code class="language-julia hljs">L = assemble_ifgf(A,X,Y; tol = 1e-4)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">IFGFOp of ComplexF64 with range 1:100000 × 1:100000
+        0.0-0.0im          -0.319991+0.241123im   …    0.122104-0.137472im
+  -0.319991+0.241123im           0.0-0.0im             0.116231+0.0858827im
+ -0.0903114+0.0696573im    0.0556752+0.122581im      -0.0468605-0.0830986im
+ -0.0153609-0.214921im     -0.183652-0.177895im       0.0825934-0.175653im
+  0.0149771-0.0883162im    0.0565182-0.0639255im       0.156611+0.0127257im
+  0.0787316+0.00686576im   0.0727485-0.0396898im  …  -0.0883295-0.0484428im
+  -0.164238-0.188781im     -0.108167-0.209809im        0.104013-0.157602im
+  0.0394206-0.0778096im    -0.100152-0.0255628im      0.0792438-0.0161379im
+ -0.0724591-0.0665069im   -0.0132802-0.0911958im       0.147614-0.093847im
+  -0.106219+0.00115193im   -0.106707+0.0110962im      0.0453872+0.125251im
+           ⋮                                      ⋱  
+  -0.175487-0.182724im      0.108718-0.152884im       -0.327314+0.210196im
+  0.0650109+0.0398307im    0.0551536-0.0653244im      0.0691201-0.0469226im
+  -0.105072-0.00731373im   -0.052421+0.10841im       -0.0916828+0.0673264im
+  -0.026642+0.0634326im    0.0340724+0.0648345im      0.0694673-0.0463002im
+ -0.0622265+0.0182138im   -0.0435138+0.0514577im  …   0.0767115-0.028724im
+  -0.116203-0.207668im    -0.0526689-0.217195im       -0.269688-0.0973112im
+ 0.00624209-0.0901617im   -0.0432379-0.0846217im     -0.0431978+0.113777im
+   0.075009+0.0209778im    0.0243798-0.0852832im      0.0742709-0.0360174im
+   0.122104-0.137472im      0.116231+0.0858827im            0.0-0.0im</code></pre><p>Note that <code>A</code> is a lazy <span>$100000 \times 100000$</span> matrix which computes its entries on demand; as such, it has a light memory footprint. Trying to instantiate the underlying <code>Matrix{ComplexF64}</code> would most likely result in you running out of memory.</p><p>To build an approximation of <code>A</code>, simply do:</p><pre><code class="language-julia hljs">L = assemble_ifgf(A,X,Y; tol = 1e-4)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">IFGFOp of ComplexF64 with range 1:100000 × 1:100000
 |-- interpolation points per cone: (8, 8, 8)
 |-- maximal meshsize per cone:     (1.57, 1.57, 1.57)
-|-- number of nodes:               593
-|-- number of leaves:              519
-|-- number of active cones:        4529
+|-- number of nodes:               585
+|-- number of leaves:              512
+|-- number of active cones:        4452
 </code></pre><p>Check the documentation of <a href="references/#IFGF.assemble_ifgf-Tuple{Any, Any, Any}"><code>assemble_ifgf</code></a> for more information on the available options.</p><p>You can now use <code>L</code> in lieu of <code>A</code> to approximate the matrix vector product, as illustrated below:</p><pre><code class="language-julia hljs">x     = randn(ComplexF64,m)
 y     = L*x</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">100000-element Vector{ComplexF64}:
- -13.019100673983557 + 141.64888637153595im
-  -47.75131006723747 + 60.528557793530865im
-  113.69125993002359 + 41.46311779063636im
-  104.68371915299113 - 10.509395472548169im
- -51.572858402171946 - 3.372006473348195im
-   -39.6001789629702 + 79.81327629239884im
-  -4.999047541487993 + 37.095006640095505im
-  14.956264157100719 - 13.719912143844954im
-   26.01005371970749 + 5.622925940828653im
-   74.50119825984373 + 35.7238571252651im
+  19.679756692626356 - 27.475718636498918im
+  15.790380080351788 + 2.8523393769358236im
+  16.518111089884066 + 53.517249809681154im
+ -15.111061766664669 + 50.454464689316325im
+   41.69729629713238 + 3.9214497660929615im
+ -3.3730864383547683 - 82.09521537776644im
+  28.985195189388364 - 23.194087914403667im
+ -13.638895461433673 - 15.435563196775515im
+   58.93785966068788 + 6.771709224627459im
+  -84.02565099297551 - 7.3117677043074725im
                      ⋮
-  -12.00254964810773 - 18.352102326152913im
-    30.6620495698076 + 5.103658701510853im
-   3.439917931313019 + 59.80063204354346im
-  -16.41097710456502 - 11.23486919361606im
-  38.282620488227025 - 46.664483992024486im
-  13.361310697085695 - 67.5480258058459im
-   1.598621822604077 + 4.194626969375966im
-    -40.091860435486 - 21.853276556930346im
-   38.61492527350087 + 5.16983427794771im</code></pre><p>Note that <code>L</code>, while not as compact as <code>A</code>, still has a relatively light memory footprint:</p><pre><code class="language-julia hljs">gb = Base.summarysize(L) / 1e9
-print(&quot;Size of L: $gb gigabytes&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Size of L: 0.073060484 gigabytes</code></pre><p>The quality of the approximation may be verified by computing the exact value at a few randomly selected set of indices:</p><pre><code class="language-julia hljs">I     = rand(1:m,100)
+   38.85131856936423 + 23.6555155954715im
+  -70.44113771746518 + 22.331067171004804im
+ -1.7261415759992262 + 31.368614903416052im
+ -39.249929839001865 + 33.40263665839471im
+   80.68422961182615 - 54.85077621703655im
+  58.396468505181076 + 32.88707189942526im
+   1.021853395208542 + 39.277753722245905im
+   -93.2468311879816 - 42.69551722288213im
+  26.111567375708102 - 11.254631797923249im</code></pre><p>Note that <code>L</code>, while not as compact as <code>A</code>, still has a relatively light memory footprint:</p><pre><code class="language-julia hljs">gb = Base.summarysize(L) / 1e9
+print(&quot;Size of L: $gb gigabytes&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Size of L: 0.072876012 gigabytes</code></pre><p>The quality of the approximation may be verified by computing the exact value at a few randomly selected set of indices:</p><pre><code class="language-julia hljs">I     = rand(1:m,100)
 exact = [sum(A[i,j]*x[j] for j in 1:m) for i in I] # matrix-vector product
 er    = norm(y[I]-exact) / norm(exact) # relative error
-print(&quot;approximate relative error: $er&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">approximate relative error: 2.1011130039280294e-5</code></pre><p>To keep things simple, we neglected some important optimizations that can be performed when defining your own kernel. See the <a href="custom_kernels/#custom-kernel-section">custom kernels</a> for more information.</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="predefined_kernels/">Predefined kernels »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.3.0 on <span class="colophon-date" title="Wednesday 13 March 2024 10:50">Wednesday 13 March 2024</span>. Using Julia version 1.10.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+print(&quot;approximate relative error: $er&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">approximate relative error: 1.83766146631823e-5</code></pre><p>To keep things simple, we neglected some important optimizations that can be performed when defining your own kernel. See the <a href="custom_kernels/#custom-kernel-section">custom kernels</a> for more information.</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="predefined_kernels/">Predefined kernels »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.3.0 on <span class="colophon-date" title="Wednesday 13 March 2024 10:53">Wednesday 13 March 2024</span>. Using Julia version 1.10.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
